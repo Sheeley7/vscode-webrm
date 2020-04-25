@@ -5,6 +5,10 @@
 	"version": "0.0.1",
 	"publisher": "sheeley7",
 	"icon": "resources/dark/vscode-webrm-logo.png",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Sheeley7/vscode-webrm.git"
+	},
 	"engines": {
 		"vscode": "^1.31.0"
 	},
