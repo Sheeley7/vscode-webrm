@@ -33,6 +33,10 @@ Initial pre-release.
 
 ## How to Use
 
+### Setup Auth Server
+Go to the following github repository and follow instructions to setup an authentication server:  
+https://github.com/Sheeley7/vscode-webrm-auth
+
 ### Set Auth Server URL
 ![gif](instructions/config.gif)
 
