@@ -2,7 +2,7 @@
 	"name": "vscode-webrm",
 	"displayName": "vscode-webrm",
 	"description": "Web Resource Manager for Dynamics 365",
-	"version": "0.0.1",
+	"version": "0.0.2",
 	"publisher": "sheeley7",
 	"icon": "resources/dark/vscode-webrm-logo.png",
 	"repository": {
