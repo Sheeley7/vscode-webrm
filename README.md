@@ -50,5 +50,5 @@ https://github.com/Sheeley7/vscode-webrm-auth
 ![gif](instructions/downloadandopen.gif)
 
 ### Publish Web Resource
-Open the command pallete (ctrl+shift+p) and select 'Dynamics: Publish Web Resource'
+Open the command palette (ctrl+shift+p) and select 'Dynamics: Publish Web Resource'
 ![gif](instructions/publish.gif)
