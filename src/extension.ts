@@ -29,7 +29,7 @@ export function activate(context: vscode.ExtensionContext) {
 	let solutionExplorer = new SolutionExplorer([]);
 	let webResourceExplorer = new WebResourceExplorer([]);
 
-	checkAuthURL();
+	checkAuth();
 	checkAPIVersion();
 	
 	statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -80,7 +80,7 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	const connectionConnectionCMD = vscode.commands.registerCommand('wrm.connect', async (connection: Connection) => {
-		if(checkAuthURL()) {
+		if(checkAuth()) {
 			vscode.window.withProgress({
 				location: vscode.ProgressLocation.Notification,
 				title: "Connecting...",
@@ -223,15 +223,29 @@ export function activate(context: vscode.ExtensionContext) {
 // this method is called when your extension is deactivated
 export function deactivate() { }
 
-function checkAuthURL() {
+function checkAuth() {
 
-	var authWebServiceURL = getConfig().get('authWebServiceURL');
-	if(authWebServiceURL === "" || authWebServiceURL === null) {
-		vscode.window.showErrorMessage("You must provide an Auth Web Service URL in the extension settings.");
-		return false;
+	var useLocalAuth = getConfig().get('useLocalAuth');
+	if(useLocalAuth === true) {
+		var clientid = getConfig().get('appClientId');
+		var clientSecret = getConfig().get('appClientSecret');
+		if(clientid === "" || clientid == null || clientSecret === "" || clientSecret == null) {
+			vscode.window.showErrorMessage("You must provide client_id and client_secret in extension settings if using local auth.");
+			return false;
+		}
+		else {
+			return true;
+		}
 	}
 	else {
-		return true;
+		var authWebServiceURL = getConfig().get('authWebServiceURL');
+		if(authWebServiceURL === "" || authWebServiceURL === null) {
+			vscode.window.showErrorMessage("You must provide an Auth Web Service URL in the extension settings.");
+			return false;
+		}
+		else {
+			return true;
+		}
 	}
 }
 

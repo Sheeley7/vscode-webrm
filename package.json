@@ -2,7 +2,7 @@
 	"name": "vscode-webrm",
 	"displayName": "vscode-webrm",
 	"description": "Web Resource Manager for Dynamics 365",
-	"version": "0.0.8",
+	"version": "0.0.11",
 	"publisher": "sheeley7",
 	"icon": "resources/dark/vscode-webrm-logo.png",
 	"repository": {
@@ -138,10 +138,10 @@
 					"description": "API Version for Dynamics 365 Web API",
 					"scope": "resource"
 				},
-				"webRM.useLocalAuthForRefresh": {
+				"webRM.useLocalAuth": {
 					"type": "boolean",
 					"default": false,
-					"description": "Flag to use local auth server with client id and client secret for token refresh.",
+					"description": "Flag to use local auth server with client id and client secret for access token and token refresh.",
 					"scope": "resource"
 				},
 				"webRM.appClientId": {
@@ -175,15 +175,19 @@
 	"devDependencies": {
 		"@types/mocha": "^2.2.42",
 		"@types/node": "^10.17.21",
+		"node-loader": "^0.6.0",
+		"ts-loader": "^7.0.4",
 		"tslint": "^5.20.1",
 		"typescript": "^3.8.3",
 		"vscode": "^1.1.37"
 	},
 	"dependencies": {
+		"@types/cookie-parser": "^1.4.2",
 		"@types/express": "^4.17.6",
 		"@types/request": "^2.48.4",
 		"@types/uuid": "^7.0.3",
 		"adal-node": "^0.1.28",
+		"cookie-parser": "^1.4.5",
 		"dynamicscrm-api": "^1.0.0",
 		"express": "^4.17.1",
 		"fs": "0.0.1-security",

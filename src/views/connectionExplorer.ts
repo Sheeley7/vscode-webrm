@@ -163,8 +163,8 @@ export class Connection extends vscode.TreeItem {
 
     async setAuthFromBrowser() {
         try {
-            await vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(getConfig().get('authWebServiceURL') + '/login?crm_url=' + this.connectionURL));
-            const { createServer, dispose } = AuthServer();
+
+            const { createServer, dispose } = await AuthServer(this.connectionURL);
             this.authServerDisposal = dispose;
             //connectionStatusController.setConnectionServerDisposal(dispose);
             let result = await createServer;
@@ -201,14 +201,13 @@ export class Connection extends vscode.TreeItem {
 
         var connectionURL = this.connectionURL;        
         let refreshResult;
-        if(getConfig().get('useLocalAuthForRefresh') === true) {
+        if(getConfig().get('useLocalAuth') === true) {
             refreshResult = await this.refreshTokenFromLocalAuth(refreshToken);
         }
         else {
             refreshResult = await this.refreshTokenFromAuthServer(refreshToken);
         }
         
-    
         //Update the Connection object with the new token results
         this.setAccessToken(refreshResult.accessToken);
         this.setRefreshToken(refreshResult.refreshToken);
@@ -220,7 +219,6 @@ export class Connection extends vscode.TreeItem {
         await this.updateTokenValuesInKeyStore(refreshResult.accessToken, refreshResult.refreshToken, refreshResult.tokenExpiration);
 
         return true;
-     
     }
 
     private async refreshTokenFromLocalAuth(refreshToken: string) {
@@ -254,8 +252,6 @@ export class Connection extends vscode.TreeItem {
                         else {
                             resolve({ accessToken: accessTokenResult, refreshToken: refreshTokenResult, tokenExpiration: new Date(tokenExpirationResult)});
                         }
-                        //self.updateValuesInKeyStore();
-                        
                     }   
                 }
                 catch(e) {
@@ -263,11 +259,7 @@ export class Connection extends vscode.TreeItem {
                 }
             });
         });
-
         return refreshResult;
-
-
-        
     }
 
     private async refreshTokenFromAuthServer(refreshToken: string) {
