@@ -142,6 +142,12 @@
 					"default": "",
 					"description": "Client Secret of Azure application registration. For use with local auth for refresh.",
 					"scope": "resource"
+				},
+				"webRM.solutionNameFilter": {
+					"type": "string",
+					"default": "",
+					"description": "Filter the list of available solutions to those that contain this string.",
+					"scope": "resource"
 				}
 			}
 		}

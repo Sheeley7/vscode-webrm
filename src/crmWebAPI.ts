@@ -9,7 +9,13 @@ import { getConfig } from './extension';
 export class CrmWebAPI {
     static async getSolutions(connection: Connection) {
         let apiVersion = getConfig().get('dynamicsAPIVersion');
-        let solutions = await this.getRecords(connection, "/api/data/v"+ apiVersion +"/solutions?$select=friendlyname,uniquename,solutionid&$filter=ismanaged eq false and isvisible eq true&$orderby=friendlyname asc");
+        let solutionFilter = getConfig().get('solutionNameFilter');
+        let additionalFilter = "";
+        if(solutionFilter != null && solutionFilter !== "") {
+            additionalFilter = " and contains(friendlyname, '"+solutionFilter+"')";
+        }
+
+        let solutions = await this.getRecords(connection, "/api/data/v"+ apiVersion +"/solutions?$select=friendlyname,uniquename,solutionid&$filter=ismanaged eq false and isvisible eq true" + additionalFilter + "&$orderby=friendlyname asc");
         var solutionObjs = [];
         for(var i = 0; i < solutions.length; i++) {
             solutionObjs.push(new Solution(solutions[i]));
