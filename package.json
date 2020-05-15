@@ -124,6 +124,24 @@
 					"default": "9.1",
 					"description": "API Version for Dynamics 365 Web API",
 					"scope": "resource"
+				},
+				"webRM.useLocalAuthForRefresh": {
+					"type": "boolean",
+					"default": false,
+					"description": "Flag to use local auth server with client id and client secret for token refresh.",
+					"scope": "resource"
+				},
+				"webRM.appClientId": {
+					"type": "string",
+					"default": "",
+					"description": "Client Id of Azure application registration. For use with local auth for refresh.",
+					"scope": "resource"
+				},
+				"webRM.appClientSecret": {
+					"type": "string",
+					"default": "",
+					"description": "Client Secret of Azure application registration. For use with local auth for refresh.",
+					"scope": "resource"
 				}
 			}
 		}

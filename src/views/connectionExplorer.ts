@@ -7,6 +7,7 @@ import e = require('express');
 import { v1 as uuidv1 } from 'uuid';
 import { promises } from 'fs';
 import { stringify } from 'querystring';
+import { AuthenticationContext, TokenResponse, ErrorResponse } from 'adal-node'
 
 
 const serviceName = "vscode-webrm";
@@ -199,7 +200,77 @@ export class Connection extends vscode.TreeItem {
         }
 
         var connectionURL = this.connectionURL;        
+        let refreshResult;
+        if(getConfig().get('useLocalAuthForRefresh') === true) {
+            refreshResult = await this.refreshTokenFromLocalAuth(refreshToken);
+        }
+        else {
+            refreshResult = await this.refreshTokenFromAuthServer(refreshToken);
+        }
         
+    
+        //Update the Connection object with the new token results
+        this.setAccessToken(refreshResult.accessToken);
+        this.setRefreshToken(refreshResult.refreshToken);
+        this.setTokenExpiration(refreshResult.tokenExpiration);
+
+        this.intialized = true;
+
+        //Update the tokens in the keystore
+        await this.updateTokenValuesInKeyStore(refreshResult.accessToken, refreshResult.refreshToken, refreshResult.tokenExpiration);
+
+        return true;
+     
+    }
+
+    private async refreshTokenFromLocalAuth(refreshToken: string) {
+        let clientId = getConfig().get('appClientId') as string;
+        let client_secret = getConfig().get('appClientSecret') as string;
+        let  authority_url = 'https://login.windows.net';
+        let authenticationContext = new AuthenticationContext(authority_url + "/common");
+        let self = this;
+        let refreshResult = await new Promise<RefreshResult>(function(resolve, reject){
+            authenticationContext.acquireTokenWithRefreshToken(refreshToken, clientId, client_secret, self.connectionURL, function(refreshErr: Error, refreshResponse: TokenResponse|ErrorResponse){
+                try {
+                    if(refreshErr) {
+                        refreshResponse = refreshResponse as ErrorResponse;
+                        if(refreshResponse.error === "invalid_grant") {
+                            reject("invalid_grant");
+                        }
+                        else reject(refreshResponse.error);
+                    }
+                    else {
+                        refreshResponse = refreshResponse as TokenResponse;
+                        let accessTokenResult = refreshResponse.accessToken;
+                        let refreshTokenResult = refreshResponse.refreshToken;
+                        let tokenExpirationResult = refreshResponse.expiresOn;
+                        if(refreshTokenResult === undefined) {
+                            refreshTokenResult = '';
+                        }
+
+                        if(typeof(accessTokenResult) === undefined || typeof(refreshTokenResult) === undefined  || typeof(tokenExpirationResult) === undefined) {
+                            throw new Error("Could not retrieve updated access token with refresh token.\n" + refreshResponse);
+                        }
+                        else {
+                            resolve({ accessToken: accessTokenResult, refreshToken: refreshTokenResult, tokenExpiration: new Date(tokenExpirationResult)});
+                        }
+                        //self.updateValuesInKeyStore();
+                        
+                    }   
+                }
+                catch(e) {
+                    reject(e);
+                }
+            });
+        });
+
+        return refreshResult;
+
+
+        
+    }
+
+    private async refreshTokenFromAuthServer(refreshToken: string) {
         //Attempt to refresh the access token using the refresh token
         var getURL = getConfig().get('authWebServiceURL') + "/refresh_token?crm_url=" + this.connectionURL + "&refresh_token="+ refreshToken;
         let refreshResult = await new Promise<RefreshResult>(function(resolve, reject) {
@@ -235,18 +306,7 @@ export class Connection extends vscode.TreeItem {
             });
         });
 
-        //Update the Connection object with the new token results
-        this.setAccessToken(refreshResult.accessToken);
-        this.setRefreshToken(refreshResult.refreshToken);
-        this.setTokenExpiration(refreshResult.tokenExpiration);
-
-        this.intialized = true;
-
-        //Update the tokens in the keystore
-        await this.updateTokenValuesInKeyStore(refreshResult.accessToken, refreshResult.refreshToken, refreshResult.tokenExpiration);
-
-        return true;
-     
+        return refreshResult;
     }
 
     private async setTokenValuesFromKeyStore() {
