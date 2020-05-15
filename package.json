@@ -14,7 +14,20 @@
 		"vscode": "^1.31.0"
 	},
 	"categories": [
-		"Other"
+		"Extension Packs"
+	],
+	"tags": [
+		"CDS",
+		"Common Data Service",
+		"CRM",
+		"Dynamics",
+		"Dynamics 365",
+		"Dynamics 365 Customer Engagement",
+		"Power Platform",
+		"PowerApps",
+		"Web Resource Manager",
+		"PowerAutomate",
+		"XRM"
 	],
 	"activationEvents": [
 		"onView:vscode-connection-explorer"
