@@ -20,12 +20,11 @@ export interface AuthServerPromise {
 }
 export const AuthServer = async (connectionURL: string) => {
     if (getConfig().get('useLocalAuth') === true) {
-        await vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(getConfig().get('authWebServiceURL') + '/login?crm_url=' + connectionURL));
-        return ExternalAuthServer(connectionURL);
+        return LocalAuthServer(connectionURL);
     }
     else {
-
-        return LocalAuthServer(connectionURL);
+        await vscode.commands.executeCommand('vscode.open', vscode.Uri.parse(getConfig().get('authWebServiceURL') + '/login?crm_url=' + connectionURL));
+        return ExternalAuthServer(connectionURL);
     }
 }
 
