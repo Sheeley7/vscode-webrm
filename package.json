@@ -176,7 +176,7 @@
 		"@types/mocha": "^2.2.42",
 		"@types/node": "^10.17.21",
 		"node-loader": "^0.6.0",
-		"ts-loader": "^7.0.4",
+		"ts-loader": "^9.4.2",
 		"tslint": "^5.20.1",
 		"typescript": "^3.8.3",
 		"vscode": "^1.1.37"
