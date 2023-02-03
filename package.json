@@ -1,198 +1,198 @@
 {
-	"name": "vscode-webrm",
-	"displayName": "vscode-webrm",
-	"description": "Web Resource Manager for Dynamics 365",
-	"version": "0.0.12",
-	"publisher": "sheeley7",
-	"icon": "resources/dark/vscode-webrm-logo.png",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/Sheeley7/vscode-webrm.git"
-	},
-	"preview": true,
-	"engines": {
-		"vscode": "^1.31.0"
-	},
-	"categories": [
-		"Extension Packs"
-	],
-	"keywords": [
-		"CDS",
-		"Common Data Service",
-		"CRM",
-		"Dynamics",
-		"Dynamics 365",
-		"Dynamics 365 Customer Engagement",
-		"Power Platform",
-		"PowerApps",
-		"Web Resource Manager",
-		"PowerAutomate",
-		"XRM"
-	],
-	"activationEvents": [
-		"onView:vscode-connection-explorer"
-	],
-	"main": "./out/extension.js",
-	"contributes": {
-		"commands": [
-			{
-				"command": "wrm.addConnection",
-				"title": "Add Connection"
-			},
-			{
-				"command": "wrm.connect",
-				"title": "Connect"
-			},
-			{
-				"command": "wrm.removeConnection",
-				"title": "Remove"
-			},
-			{
-				"command": "wrm.getWebResources",
-				"title": "Get Web Resources"
-			},
-			{
-				"command": "wrm.publishWebResource",
-				"title": "Dynamics: Publish Web Resource"
-			},
-			{
-				"command": "wrm.openWebResource",
-				"title": "Open"
-			}
-		],
-		"viewsContainers": {
-			"activitybar": [
-				{
-					"id": "vscode-webresourcemanager",
-					"title": "Web Resource Manager for Dynamics 365",
-					"icon": "resources/dark/DynamicsCRM.svg"
-				}
-			]
-		},
-		"views": {
-			"vscode-webresourcemanager": [
-				{
-					"id": "vscode-connection-explorer",
-					"name": "Connection Manager"
-				},
-				{
-					"id": "vscode-solution-explorer",
-					"name": "Solutions"
-				},
-				{
-					"id": "vscode-webresource-explorer",
-					"name": "Web Resources"
-				}
-			]
-		},
-		"menus": {
-			"commandPalette": [
-				{
-					"command": "wrm.publishWebResource",
-					"when": "activeEditor"
-				}
-			],
-			"view/title": [
-				{
-					"command": "wrm.addConnection",
-					"when": "view == vscode-connection-explorer",
-					"group": "navigation@1"
-				}
-			],
-			"view/item/context": [
-				{
-					"command": "wrm.connect",
-					"when": "view == vscode-connection-explorer && viewItem == connection",
-					"group": "inline"
-				},
-				{
-					"command": "wrm.removeConnection",
-					"when": "view == vscode-connection-explorer && viewItem == connection"
-				},
-				{
-					"command": "wrm.getWebResources",
-					"when": "view == vscode-solution-explorer && viewItem == solution",
-					"group": "inline"
-				},
-				{
-					"command": "wrm.openWebResource",
-					"when": "view == vscode-webresource-explorer && viewItem == webresource",
-					"group": "inline"
-				}
-			],
-			"editor/context": []
-		},
-		"configuration": {
-			"type": "object",
-			"title": "Web Resource Manager for D365",
-			"properties": {
-				"webRM.authWebServiceURL": {
-					"type": "string",
-					"default": "",
-					"description": "URL for the web service that performs OAuth2 Authentication.",
-					"scope": "resource"
-				},
-				"webRM.dynamicsAPIVersion": {
-					"type": "string",
-					"default": "9.1",
-					"description": "API Version for Dynamics 365 Web API",
-					"scope": "resource"
-				},
-				"webRM.useLocalAuth": {
-					"type": "boolean",
-					"default": false,
-					"description": "Flag to use local auth server with client id and client secret for access token and token refresh.",
-					"scope": "resource"
-				},
-				"webRM.appClientId": {
-					"type": "string",
-					"default": "",
-					"description": "Client Id of Azure application registration. For use with local auth for refresh.",
-					"scope": "resource"
-				},
-				"webRM.appClientSecret": {
-					"type": "string",
-					"default": "",
-					"description": "Client Secret of Azure application registration. For use with local auth for refresh.",
-					"scope": "resource"
-				},
-				"webRM.solutionNameFilter": {
-					"type": "string",
-					"default": "",
-					"description": "Filter the list of available solutions to those that contain this string.",
-					"scope": "resource"
-				}
-			}
-		}
-	},
-	"scripts": {
-		"vscode:prepublish": "npm run compile",
-		"compile": "tsc -p ./",
-		"watch": "tsc -watch -p ./",
-		"postinstall": "node ./node_modules/vscode/bin/install",
-		"test": "npm run compile && node ./node_modules/vscode/bin/test"
-	},
-	"devDependencies": {
-		"@types/mocha": "^2.2.42",
-		"@types/node": "^10.17.21",
-		"node-loader": "^0.6.0",
-		"ts-loader": "^7.0.4",
-		"tslint": "^5.20.1",
-		"typescript": "^3.8.3",
-		"vscode": "^1.1.37"
-	},
-	"dependencies": {
-		"@types/cookie-parser": "^1.4.2",
-		"@types/express": "^4.17.6",
-		"@types/request": "^2.48.4",
-		"@types/uuid": "^7.0.3",
-		"adal-node": "^0.1.28",
-		"cookie-parser": "^1.4.5",
-		"dynamicscrm-api": "^1.0.0",
-		"express": "^4.17.1",
-		"fs": "0.0.1-security",
-		"keytar": "^5.5.0",
-		"node-dcrm-service": "^3.1.4",
-		"uuid": "^7.0.3"
-	}
+  "name": "vscode-webrm",
+  "displayName": "vscode-webrm",
+  "description": "Web Resource Manager for Dataverse",
+  "version": "0.0.12",
+  "publisher": "sheeley7",
+  "icon": "resources/dark/vscode-webrm-logo.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sheeley7/vscode-webrm.git"
+  },
+  "preview": true,
+  "engines": {
+    "vscode": "^1.31.0"
+  },
+  "categories": [
+    "Extension Packs"
+  ],
+  "keywords": [
+    "CDS",
+    "Common Data Service",
+    "CRM",
+    "Dynamics",
+    "Dynamics 365",
+    "Dynamics 365 Customer Engagement",
+    "Power Platform",
+    "PowerApps",
+    "Web Resource Manager",
+    "PowerAutomate",
+    "XRM"
+  ],
+  "activationEvents": [
+    "onView:vscode-connection-explorer"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "wrm.addConnection",
+        "title": "Add Connection"
+      },
+      {
+        "command": "wrm.connect",
+        "title": "Connect"
+      },
+      {
+        "command": "wrm.removeConnection",
+        "title": "Remove"
+      },
+      {
+        "command": "wrm.getWebResources",
+        "title": "Get Web Resources"
+      },
+      {
+        "command": "wrm.publishWebResource",
+        "title": "Dynamics: Publish Web Resource"
+      },
+      {
+        "command": "wrm.openWebResource",
+        "title": "Open"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "vscode-webresourcemanager",
+          "title": "Web Resource Manager for Dynamics 365",
+          "icon": "resources/dark/DynamicsCRM.svg"
+        }
+      ]
+    },
+    "views": {
+      "vscode-webresourcemanager": [
+        {
+          "id": "vscode-connection-explorer",
+          "name": "Connection Manager"
+        },
+        {
+          "id": "vscode-solution-explorer",
+          "name": "Solutions"
+        },
+        {
+          "id": "vscode-webresource-explorer",
+          "name": "Web Resources"
+        }
+      ]
+    },
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "wrm.publishWebResource",
+          "when": "activeEditor"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "wrm.addConnection",
+          "when": "view == vscode-connection-explorer",
+          "group": "navigation@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "wrm.connect",
+          "when": "view == vscode-connection-explorer && viewItem == connection",
+          "group": "inline"
+        },
+        {
+          "command": "wrm.removeConnection",
+          "when": "view == vscode-connection-explorer && viewItem == connection"
+        },
+        {
+          "command": "wrm.getWebResources",
+          "when": "view == vscode-solution-explorer && viewItem == solution",
+          "group": "inline"
+        },
+        {
+          "command": "wrm.openWebResource",
+          "when": "view == vscode-webresource-explorer && viewItem == webresource",
+          "group": "inline"
+        }
+      ],
+      "editor/context": []
+    },
+    "configuration": {
+      "type": "object",
+      "title": "Web Resource Manager for D365",
+      "properties": {
+        "webRM.authWebServiceURL": {
+          "type": "string",
+          "default": "",
+          "description": "URL for the web service that performs OAuth2 Authentication.",
+          "scope": "resource"
+        },
+        "webRM.dynamicsAPIVersion": {
+          "type": "string",
+          "default": "9.1",
+          "description": "API Version for Dynamics 365 Web API",
+          "scope": "resource"
+        },
+        "webRM.useLocalAuth": {
+          "type": "boolean",
+          "default": false,
+          "description": "Flag to use local auth server with client id and client secret for access token and token refresh.",
+          "scope": "resource"
+        },
+        "webRM.appClientId": {
+          "type": "string",
+          "default": "",
+          "description": "Client Id of Azure application registration. For use with local auth for refresh.",
+          "scope": "resource"
+        },
+        "webRM.appClientSecret": {
+          "type": "string",
+          "default": "",
+          "description": "Client Secret of Azure application registration. For use with local auth for refresh.",
+          "scope": "resource"
+        },
+        "webRM.solutionNameFilter": {
+          "type": "string",
+          "default": "",
+          "description": "Filter the list of available solutions to those that contain this string.",
+          "scope": "resource"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "postinstall": "node ./node_modules/vscode/bin/install",
+    "test": "npm run compile && node ./node_modules/vscode/bin/test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.1",
+    "@types/node": "^18.11.18",
+    "node-loader": "^2.0.0",
+    "ts-loader": "^9.4.2",
+    "tslint": "^5.20.1",
+    "typescript": "^4.9.5",
+    "vscode": "^1.1.37"
+  },
+  "dependencies": {
+    "@types/cookie-parser": "^1.4.3",
+    "@types/express": "^4.17.16",
+    "@types/request": "^2.48.8",
+    "@types/uuid": "^9.0.0",
+    "adal-node": "^0.2.4",
+    "cookie-parser": "^1.4.6",
+    "dynamicscrm-api": "^1.0.0",
+    "express": "^4.18.2",
+    "fs": "0.0.1-security",
+    "keytar": "^7.9.0",
+    "node-dcrm-service": "^3.1.4",
+    "uuid": "^9.0.0"
+  }
 }
