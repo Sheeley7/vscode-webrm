@@ -1,52 +1,51 @@
-import * as vscode from 'vscode';
+import * as vscode from "vscode";
 
 export class SolutionExplorer implements vscode.TreeDataProvider<Solution> {
-    
-    private solutions: Solution[] = [];
-    
-    constructor(solutions: Solution[]) {
-        this.solutions = solutions;
-    }
+  private solutions: Solution[] = [];
 
-    private _onDidChangeTreeData: vscode.EventEmitter<any> = new vscode.EventEmitter<any>();
-    readonly onDidChangeTreeData: vscode.Event<any> = this._onDidChangeTreeData.event;
-    getTreeItem(element: Solution): vscode.TreeItem | Thenable<vscode.TreeItem> {
-        return element;
-    }
+  constructor(solutions: Solution[]) {
+    this.solutions = solutions;
+  }
 
-    getChildren(element?: Solution): vscode.ProviderResult<Solution[]> {
-        return this.solutions;
-    }
+  private _onDidChangeTreeData: vscode.EventEmitter<any> =
+    new vscode.EventEmitter<any>();
+  readonly onDidChangeTreeData: vscode.Event<any> =
+    this._onDidChangeTreeData.event;
+  getTreeItem(element: Solution): vscode.TreeItem | Thenable<vscode.TreeItem> {
+    return element;
+  }
 
-    setSolutions(solutions: Solution[]) {
-        this.solutions = solutions;
-    }
+  getChildren(element?: Solution): vscode.ProviderResult<Solution[]> {
+    return this.solutions;
+  }
 
-    clearSolutions() {
-        this.solutions = [];
-        this.refresh();
-    }
+  setSolutions(solutions: Solution[]) {
+    this.solutions = solutions;
+  }
 
-    refresh(): void {
-        this._onDidChangeTreeData.fire();
-    }
+  clearSolutions() {
+    this.solutions = [];
+    this.refresh();
+  }
 
+  refresh(): void {
+    this._onDidChangeTreeData.fire(null);
+  }
 }
 
 export class Solution extends vscode.TreeItem {
-    public contextValue: string = "solution";
-    solutionName: string;
-    solutionUniqueName: string;
-    solutionId: string;
-    constructor(json: any) {
-        super(json.friendlyname, vscode.TreeItemCollapsibleState.None);
-        this.solutionName = json.friendlyname;
-        this.solutionUniqueName = json.uniquename;
-        this.solutionId = json.solutionid;
-    }
+  public contextValue: string = "solution";
+  solutionName: string;
+  solutionUniqueName: string;
+  solutionId: string;
+  constructor(json: any) {
+    super(json.friendlyname, vscode.TreeItemCollapsibleState.None);
+    this.solutionName = json.friendlyname;
+    this.solutionUniqueName = json.uniquename;
+    this.solutionId = json.solutionid;
+  }
 
-    getSolutionId() {
-        return this.solutionId;
-    }
-
+  getSolutionId() {
+    return this.solutionId;
+  }
 }

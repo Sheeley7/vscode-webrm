@@ -1,12 +1,9 @@
 import * as vscode from "vscode";
 import { AuthServer } from "../auth/server/localserver";
-import * as request from "request";
 import { getConfig } from "../extension";
 import * as keytar from "keytar";
 import e = require("express");
 import { v1 as uuidv1 } from "uuid";
-import { promises } from "fs";
-import { stringify } from "querystring";
 import { AuthenticationContext, TokenResponse, ErrorResponse } from "adal-node";
 
 const serviceName = "vscode-webrm";
@@ -83,7 +80,7 @@ export class ConnectionExplorer implements vscode.TreeDataProvider<Connection> {
   }
 
   refresh(): void {
-    this._onDidChangeTreeData.fire();
+    this._onDidChangeTreeData.fire(null);
   }
 }
 
@@ -255,7 +252,6 @@ export class Connection extends vscode.TreeItem {
 
   private async refreshTokenFromLocalAuth(refreshToken: string) {
     let clientId = getConfig().get("appClientId") as string;
-    let client_secret = getConfig().get("appClientSecret") as string;
     let authority_url = "https://login.windows.net";
     let authenticationContext = new AuthenticationContext(
       authority_url + "/common"
@@ -268,7 +264,7 @@ export class Connection extends vscode.TreeItem {
       authenticationContext.acquireTokenWithRefreshToken(
         refreshToken,
         clientId,
-        client_secret,
+        "",
         self.connectionURL,
         function (
           refreshErr: Error,

@@ -1,7 +1,6 @@
 import * as express from "express";
 import { Server } from "http";
 import { getConfig } from "./../../extension";
-import { WorkspaceConfiguration } from "vscode";
 import * as querystring from "querystring";
 import { AuthenticationContext } from "adal-node";
 import * as vscode from "vscode";
@@ -119,12 +118,13 @@ const LocalAuthServer = async (connectionURL: string) => {
         var authenticationContext = new AuthenticationContext(
           authority_url + "/common"
         );
+
         authenticationContext.acquireTokenWithAuthorizationCode(
           req.query.code,
           redirect_uri + "/code",
           connectionURL,
           getConfig().get("appClientId") as string,
-          getConfig().get("appClientSecret") as string,
+          "",
           function (err: any, response: any) {
             var message = "";
             if (err) {
