@@ -2,7 +2,7 @@
   "name": "vscode-webrm",
   "displayName": "vscode-webrm",
   "description": "Web Resource Manager for Dataverse",
-  "version": "0.0.14",
+  "version": "0.0.15",
   "publisher": "sheeley7",
   "icon": "resources/dark/vscode-webrm-logo.png",
   "repository": {
@@ -124,28 +124,22 @@
       "type": "object",
       "title": "Web Resource Manager for D365",
       "properties": {
-        "webRM.authWebServiceURL": {
-          "type": "string",
-          "default": "",
-          "description": "URL for the web service that performs OAuth2 Authentication.",
-          "scope": "resource"
-        },
         "webRM.dynamicsAPIVersion": {
           "type": "string",
           "default": "9.1",
           "description": "API Version for Dynamics 365 Web API",
           "scope": "resource"
         },
-        "webRM.useLocalAuth": {
-          "type": "boolean",
-          "default": false,
-          "description": "Flag to use local auth server with client id for access token and token refresh.",
-          "scope": "resource"
-        },
         "webRM.appClientId": {
           "type": "string",
           "default": "",
           "description": "Client Id of Azure application registration. For use with local auth for refresh.",
+          "scope": "resource"
+        },
+        "webRM.connectionInfoFolder": {
+          "type": "string",
+          "default": "",
+          "description": "Folder location on disk to store encrypted connection strings.",
           "scope": "resource"
         },
         "webRM.solutionNameFilter": {
@@ -183,7 +177,8 @@
     "typescript": "^4.9.4"
   },
   "dependencies": {
-    "adal-node": "^0.2.4",
+    "@azure/msal-node": "^1.15.0",
+    "@azure/msal-node-extensions": "^1.0.0-alpha.30",
     "cookie-parser": "^1.4.6",
     "express": "^4.18.2",
     "keytar": "^7.9.0",

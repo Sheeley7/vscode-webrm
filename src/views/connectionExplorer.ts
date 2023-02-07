@@ -1,10 +1,8 @@
 import * as vscode from "vscode";
-import { AuthServer } from "../auth/server/localserver";
-import { getConfig } from "../extension";
 import * as keytar from "keytar";
 import e = require("express");
 import { v1 as uuidv1 } from "uuid";
-import { AuthenticationContext, TokenResponse, ErrorResponse } from "adal-node";
+import { AuthProvider } from "../auth/authProvider";
 
 const serviceName = "vscode-webrm";
 
@@ -14,7 +12,6 @@ export class ConnectionExplorer implements vscode.TreeDataProvider<Connection> {
   constructor(private globalContext: vscode.ExtensionContext) {
     var connections = globalContext.globalState.get<any[]>("connections", []);
     for (var i = 0; i < connections.length; i++) {
-      //this.childItems.push();
       let connection = new Connection(
         connections[i],
         vscode.TreeItemCollapsibleState.None
@@ -84,12 +81,6 @@ export class ConnectionExplorer implements vscode.TreeDataProvider<Connection> {
   }
 }
 
-interface RefreshResult {
-  accessToken: string;
-  refreshToken: string;
-  tokenExpiration: Date;
-}
-
 export class Connection extends vscode.TreeItem {
   public contextValue: string = "connection";
   public label: string;
@@ -98,14 +89,11 @@ export class Connection extends vscode.TreeItem {
   private connectionName: string;
   private connectionURL: string;
   #accessToken: string;
-  #refreshToken: string;
   #tokenExpiration: Date;
-  private accessTokenKey: string;
-  private refreshTokenKey: string;
-  private tokenExpirationKey: string;
+
   private connectionId: string;
   private intialized: boolean;
-  public authServerDisposal: () => void;
+  private authProvider: AuthProvider;
 
   constructor(
     connectionObj: any,
@@ -117,10 +105,9 @@ export class Connection extends vscode.TreeItem {
     this.connectionName = connectionObj.connectionName;
     this.connectionURL = connectionObj.connectionURL;
     this.#accessToken = "";
-    this.#refreshToken = "";
     this.#tokenExpiration = new Date("1995-12-17T03:24:00");
+    //this.#accountInfoString = "";
     this.intialized = false;
-    this.authServerDisposal = () => {};
 
     if (
       connectionObj.connectionId === null ||
@@ -132,12 +119,11 @@ export class Connection extends vscode.TreeItem {
       this.connectionId = connectionObj.connectionId;
     }
 
-    this.accessTokenKey =
-      this.connectionName + "|" + this.connectionId + "|ACCESSTOKEN";
-    this.refreshTokenKey =
-      this.connectionName + "|" + this.connectionId + "|REFRESHTOKEN";
-    this.tokenExpirationKey =
-      this.connectionName + "|" + this.connectionId + "|TOKENEXPIRATION";
+    this.authProvider = new AuthProvider(
+      this.connectionURL,
+      this.connectionId,
+      this.connectionName
+    );
 
     this.collapsibleState = collapsibleState;
   }
@@ -145,30 +131,19 @@ export class Connection extends vscode.TreeItem {
   async connect() {
     let connectionSuccessful = false;
 
-    //If not intialized, get values from the keystore
-    if (this.intialized === false) {
-      await this.setTokenValuesFromKeyStore();
-    }
-
-    //If the access token has expired
     if (this.getTokenExpiration() < new Date()) {
-      //If there is no refresh token, then get tokens from the browser
-      if (this.getRefreshToken() === "") {
-        connectionSuccessful = await this.setAuthFromBrowser();
+      const authResult = await this.authProvider.login();
+
+      if (authResult === null) {
+        throw "AuthError";
       }
-      //Otherwise, attempt to refresh the token
-      else {
-        try {
-          connectionSuccessful = await this.refreshAccessToken();
-        } catch (err) {
-          //If the refresh has an invalid grant error, try to get tokens from the browser
-          if (err === "invalid_grant") {
-            connectionSuccessful = await this.setAuthFromBrowser();
-          } else {
-            throw err;
-          }
-        }
-      }
+
+      this.setAccessToken(authResult.accessToken);
+      this.setTokenExpiration(authResult.expiresOn);
+
+      connectionSuccessful = true;
+
+      this.intialized = true;
     }
     //Otherwise return connection successful as we already have tokens that are not expired
     else {
@@ -178,183 +153,8 @@ export class Connection extends vscode.TreeItem {
     return connectionSuccessful;
   }
 
-  async setAuthFromBrowser() {
-    try {
-      const { createServer, dispose } = await AuthServer(this.connectionURL);
-      this.authServerDisposal = dispose;
-      //connectionStatusController.setConnectionServerDisposal(dispose);
-      let result = await createServer;
-      dispose();
-      this.authServerDisposal = () => {};
-      this.#accessToken = result.access_token;
-      this.#refreshToken = result.refresh_token;
-      let asyncOps = [];
-      let dateNow = new Date();
-      dateNow.setMinutes(dateNow.getMinutes() + 58);
-      this.#tokenExpiration = dateNow;
-      asyncOps.push(
-        keytar.setPassword(serviceName, this.accessTokenKey, this.#accessToken)
-      );
-      asyncOps.push(
-        keytar.setPassword(
-          serviceName,
-          this.refreshTokenKey,
-          this.#refreshToken
-        )
-      );
-      asyncOps.push(
-        keytar.setPassword(
-          serviceName,
-          this.tokenExpirationKey,
-          this.#tokenExpiration.toISOString()
-        )
-      );
-
-      await Promise.all(asyncOps);
-      this.intialized = true;
-      return true;
-    } catch (err) {
-      return false;
-    }
-  }
-
-  async refreshAccessToken() {
-    let refreshToken = this.getRefreshToken();
-
-    //If the refresh token is blank, throw an error
-    if (refreshToken === "") {
-      throw new Error(
-        "An attempt to refresh token was made, but no refresh token was provided"
-      );
-    }
-
-    var connectionURL = this.connectionURL;
-    let refreshResult;
-
-    refreshResult = await this.refreshTokenFromLocalAuth(refreshToken);
-
-    //Update the Connection object with the new token results
-    this.setAccessToken(refreshResult.accessToken);
-    this.setRefreshToken(refreshResult.refreshToken);
-    this.setTokenExpiration(refreshResult.tokenExpiration);
-
-    this.intialized = true;
-
-    //Update the tokens in the keystore
-    await this.updateTokenValuesInKeyStore(
-      refreshResult.accessToken,
-      refreshResult.refreshToken,
-      refreshResult.tokenExpiration
-    );
-
-    return true;
-  }
-
-  private async refreshTokenFromLocalAuth(refreshToken: string) {
-    let clientId = getConfig().get("appClientId") as string;
-    let authority_url = "https://login.windows.net";
-    let authenticationContext = new AuthenticationContext(
-      authority_url + "/common"
-    );
-    let self = this;
-    let refreshResult = await new Promise<RefreshResult>(function (
-      resolve,
-      reject
-    ) {
-      authenticationContext.acquireTokenWithRefreshToken(
-        refreshToken,
-        clientId,
-        "",
-        self.connectionURL,
-        function (
-          refreshErr: Error,
-          refreshResponse: TokenResponse | ErrorResponse
-        ) {
-          try {
-            if (refreshErr) {
-              refreshResponse = refreshResponse as ErrorResponse;
-              if (refreshResponse.error === "invalid_grant") {
-                reject("invalid_grant");
-              } else reject(refreshResponse.error);
-            } else {
-              refreshResponse = refreshResponse as TokenResponse;
-              let accessTokenResult = refreshResponse.accessToken;
-              let refreshTokenResult = refreshResponse.refreshToken;
-              let tokenExpirationResult = refreshResponse.expiresOn;
-              if (refreshTokenResult === undefined) {
-                refreshTokenResult = "";
-              }
-
-              if (
-                typeof accessTokenResult === undefined ||
-                typeof refreshTokenResult === undefined ||
-                typeof tokenExpirationResult === undefined
-              ) {
-                throw new Error(
-                  "Could not retrieve updated access token with refresh token.\n" +
-                    refreshResponse
-                );
-              } else {
-                resolve({
-                  accessToken: accessTokenResult,
-                  refreshToken: refreshTokenResult,
-                  tokenExpiration: new Date(tokenExpirationResult),
-                });
-              }
-            }
-          } catch (e) {
-            reject(e);
-          }
-        }
-      );
-    });
-    return refreshResult;
-  }
-
-  private async setTokenValuesFromKeyStore() {
-    const [accessToken, refreshToken, tokenExpiration] = await Promise.all([
-      keytar.getPassword(serviceName, this.accessTokenKey),
-      keytar.getPassword(serviceName, this.refreshTokenKey),
-      keytar.getPassword(serviceName, this.tokenExpirationKey),
-    ]);
-    this.setAccessToken(accessToken !== null ? accessToken : "");
-    this.setRefreshToken(refreshToken !== null ? refreshToken : "");
-    this.setTokenExpiration(
-      tokenExpiration !== null
-        ? new Date(tokenExpiration)
-        : new Date("1995-12-17T03:24:00")
-    );
-    this.intialized = true;
-  }
-
-  private async updateTokenValuesInKeyStore(
-    accessToken: string,
-    refreshToken: string,
-    tokenExpiration: Date
-  ) {
-    let asyncOps = [];
-    asyncOps.push(
-      keytar.setPassword(serviceName, this.accessTokenKey, accessToken)
-    );
-    asyncOps.push(
-      keytar.setPassword(serviceName, this.refreshTokenKey, refreshToken)
-    );
-    asyncOps.push(
-      keytar.setPassword(
-        serviceName,
-        this.tokenExpirationKey,
-        tokenExpiration.toISOString()
-      )
-    );
-    await Promise.all(asyncOps);
-  }
-
   public async deleteConnection() {
-    let deletes = [];
-    deletes.push(keytar.deletePassword(serviceName, this.refreshTokenKey));
-    deletes.push(keytar.deletePassword(serviceName, this.accessTokenKey));
-    deletes.push(keytar.deletePassword(serviceName, this.tokenExpirationKey));
-    let result = await Promise.all(deletes);
+    //Delete connection file from file system
   }
 
   public getConnectionName() {
@@ -369,17 +169,14 @@ export class Connection extends vscode.TreeItem {
   public setAccessToken(newToken: string) {
     this.#accessToken = newToken;
   }
-  public getRefreshToken() {
-    return this.#refreshToken;
-  }
-  public setTokenExpiration(newDate: Date) {
-    this.#tokenExpiration = newDate;
+
+  public setTokenExpiration(newDate: Date | null) {
+    const dateNowPlus1Hour = new Date();
+    dateNowPlus1Hour.setMinutes(dateNowPlus1Hour.getMinutes() + 58);
+    this.#tokenExpiration = newDate || dateNowPlus1Hour;
   }
   public getTokenExpiration() {
     return this.#tokenExpiration;
-  }
-  public setRefreshToken(newToken: string) {
-    this.#refreshToken = newToken;
   }
   public getConnectionId() {
     return this.connectionId;

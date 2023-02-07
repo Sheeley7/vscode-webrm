@@ -8,6 +8,7 @@ import { ConnectionStatusController } from "./connectionStatusController";
 import { CrmWebAPI } from "./crmWebAPI";
 import * as fs from "fs";
 import * as path from "path";
+import { config } from "process";
 
 let statusBar: vscode.StatusBarItem;
 
@@ -25,8 +26,13 @@ export function activate(context: vscode.ExtensionContext) {
   let solutionExplorer = new SolutionExplorer([]);
   let webResourceExplorer = new WebResourceExplorer([]);
 
-  checkAuth();
-  checkAPIVersion();
+  let configSet = checkClientId();
+  configSet &&= checkAPIVersion();
+  configSet &&= checkConfigFolder();
+  //Make sure required configs are set
+  if (!configSet) {
+    return;
+  }
 
   statusBar = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Left,
@@ -104,29 +110,31 @@ export function activate(context: vscode.ExtensionContext) {
   const connectionConnectionCMD = vscode.commands.registerCommand(
     "wrm.connect",
     async (connection: Connection) => {
-      if (checkAuth()) {
-        vscode.window.withProgress(
-          {
-            location: vscode.ProgressLocation.Notification,
-            title: "Connecting...",
-            cancellable: true,
-          },
-          async (progress, token) => {
-            token.onCancellationRequested(() => {
-              connectionStatusController.disposeOfConnectionServer();
-            });
-
-            connectionStatusController.setCurrentConnection(connection);
+      vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: "Connecting...",
+          cancellable: true,
+        },
+        async (progress, token) => {
+          connectionStatusController.setCurrentConnection(connection);
+          try {
             await connectionStatusController.connect();
-            progress.report({ message: "Getting Solutions..." });
-
-            let solutions = await CrmWebAPI.getSolutions(connection);
-            solutionExplorer.setSolutions(solutions);
-            solutionExplorer.refresh();
+          } catch (error) {
+            vscode.window.showErrorMessage(
+              "There was an error in the connection process."
+            );
             return;
           }
-        );
-      }
+
+          progress.report({ message: "Getting Solutions..." });
+
+          let solutions = await CrmWebAPI.getSolutions(connection);
+          solutionExplorer.setSolutions(solutions);
+          solutionExplorer.refresh();
+          return;
+        }
+      );
     }
   );
 
@@ -205,9 +213,6 @@ export function activate(context: vscode.ExtensionContext) {
             cancellable: true,
           },
           async (progress, token) => {
-            token.onCancellationRequested(() => {
-              connectionStatusController.disposeOfConnectionServer();
-            });
             let connection = connectionStatusController.getCurrentConnection();
 
             //If there is an active connection
@@ -217,9 +222,7 @@ export function activate(context: vscode.ExtensionContext) {
               //Attempt to connect
               try {
                 await connection.connect();
-              } catch (err) {
-                connectionStatusController.disposeOfConnectionServer();
-              }
+              } catch (err) {}
 
               //Update message to Publishing Web Resources
               progress.report({ message: "Publishing Web Resource..." });
@@ -277,33 +280,32 @@ export function activate(context: vscode.ExtensionContext) {
 // This method is called when your extension is deactivated
 export function deactivate() {}
 
-function checkAuth() {
-  var useLocalAuth = getConfig().get("useLocalAuth");
-  if (useLocalAuth === true) {
-    var clientid = getConfig().get("appClientId");
-    if (clientid === "" || clientid == null) {
-      vscode.window.showErrorMessage(
-        "You must provide client_id in extension settings if using local auth."
-      );
-      return false;
-    } else {
-      return true;
-    }
+function checkClientId() {
+  const clientid = getConfig().get("appClientId");
+  if (clientid === "" || clientid === null || clientid === undefined) {
+    vscode.window.showErrorMessage(
+      "You must provide client_id in extension settings."
+    );
+    return false;
   } else {
-    var authWebServiceURL = getConfig().get("authWebServiceURL");
-    if (authWebServiceURL === "" || authWebServiceURL === null) {
-      vscode.window.showErrorMessage(
-        "You must provide an Auth Web Service URL in the extension settings."
-      );
-      return false;
-    } else {
-      return true;
-    }
+    return true;
+  }
+}
+
+function checkConfigFolder() {
+  const folder = getConfig().get("connectionInfoFolder");
+  if (folder === "" || folder === null || folder === undefined) {
+    vscode.window.showErrorMessage(
+      "You must provide folder for connection info in extension settings."
+    );
+    return false;
+  } else {
+    return true;
   }
 }
 
 function checkAPIVersion() {
-  var webServiceAPIVersion = getConfig().get("");
+  const webServiceAPIVersion = getConfig().get("dynamicsAPIVersion");
   if (webServiceAPIVersion === "" || webServiceAPIVersion === null) {
     vscode.window.showErrorMessage(
       "You must provide a Web API Version in the extension settings."
