@@ -3,6 +3,8 @@ import * as keytar from "keytar";
 import e = require("express");
 import { v1 as uuidv1 } from "uuid";
 import { AuthProvider } from "../auth/authProvider";
+import { getConfig } from "./../extension";
+import * as fs from "fs";
 
 const serviceName = "vscode-webrm";
 
@@ -155,6 +157,15 @@ export class Connection extends vscode.TreeItem {
 
   public async deleteConnection() {
     //Delete connection file from file system
+    const fileName = `${getConfig().get("connectionInfoFolder")}/${
+      this.connectionName
+    }-${this.connectionId}.json`;
+
+    try {
+      fs.unlinkSync(fileName);
+    } catch (error) {
+      console.log("could not delete file");
+    }
   }
 
   public getConnectionName() {
