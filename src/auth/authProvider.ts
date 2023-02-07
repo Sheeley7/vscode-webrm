@@ -40,9 +40,12 @@ export class AuthProvider {
   }
 
   async init() {
-    const filePath = `${getConfig().get("connectionInfoFolder")}/${
-      this.connectionName
-    }-${this.connectionId}.json`;
+    let connectionFolder: string =
+      getConfig().get("connectionInfoFolder") || "";
+    if (connectionFolder.endsWith("/") || connectionFolder.endsWith("\\")) {
+      connectionFolder = connectionFolder.slice(0, -1);
+    }
+    let filePath = `${connectionFolder}/${this.connectionName}-${this.connectionId}.json`;
     const persistence = await PersistenceCreator.createPersistence({
       cachePath: filePath,
       dataProtectionScope: DataProtectionScope.CurrentUser,
@@ -59,6 +62,10 @@ export class AuthProvider {
         cachePlugin: new PersistenceCachePlugin(persistence),
       },
     };
+    const tenantId = getConfig().get("appTenantId");
+    if (tenantId !== null && tenantId !== "" && tenantId !== undefined) {
+      msalConfig.auth.authority = `https://login.microsoftonline.com/${tenantId}/`;
+    }
 
     this.clientApplication = new PublicClientApplication(msalConfig);
     this.cache = this.clientApplication.getTokenCache();

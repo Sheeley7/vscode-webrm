@@ -138,6 +138,7 @@ export class Connection extends vscode.TreeItem {
 
       if (authResult === null) {
         throw "AuthError";
+        4;
       }
 
       this.setAccessToken(authResult.accessToken);
@@ -156,10 +157,13 @@ export class Connection extends vscode.TreeItem {
   }
 
   public async deleteConnection() {
+    let connectionFolder: string =
+      getConfig().get("connectionInfoFolder") || "";
+    if (connectionFolder.endsWith("/") || connectionFolder.endsWith("\\")) {
+      connectionFolder = connectionFolder.slice(0, -1);
+    }
     //Delete connection file from file system
-    const fileName = `${getConfig().get("connectionInfoFolder")}/${
-      this.connectionName
-    }-${this.connectionId}.json`;
+    const fileName = `${connectionFolder}/${this.connectionName}-${this.connectionId}.json`;
 
     try {
       fs.unlinkSync(fileName);

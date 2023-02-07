@@ -16,13 +16,16 @@ export class CrmWebAPI {
         " and contains(friendlyname, '" + solutionFilter + "')";
     }
 
+    const sortOrder = getConfig().get("solutionSortAscending") ? "asc" : "desc";
+
     let solutions = await this.getRecords(
       connection,
       "/api/data/v" +
         apiVersion +
         "/solutions?$select=friendlyname,uniquename,solutionid&$filter=ismanaged eq false and isvisible eq true" +
         additionalFilter +
-        "&$orderby=friendlyname asc"
+        "&$orderby=friendlyname " +
+        sortOrder
     );
     var solutionObjs = [];
     for (var i = 0; i < solutions.length; i++) {

@@ -72,6 +72,13 @@ export function activate(context: vscode.ExtensionContext) {
         let connectionURLFinal: string =
           connectionURL === undefined ? "" : connectionURL;
 
+        if (
+          connectionURLFinal.endsWith("/") ||
+          connectionURLFinal.endsWith("\\")
+        ) {
+          connectionURLFinal = connectionURLFinal.slice(0, -1);
+        }
+
         let addConnectionResult = await connectionExplorer.addItem(
           connectionNameFinal,
           connectionURLFinal

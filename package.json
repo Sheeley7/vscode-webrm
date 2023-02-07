@@ -2,7 +2,7 @@
   "name": "vscode-webrm",
   "displayName": "vscode-webrm",
   "description": "Web Resource Manager for Dataverse",
-  "version": "0.0.15",
+  "version": "0.0.16",
   "publisher": "sheeley7",
   "icon": "resources/dark/vscode-webrm-logo.png",
   "repository": {
@@ -133,7 +133,13 @@
         "webRM.appClientId": {
           "type": "string",
           "default": "",
-          "description": "Client Id of Azure application registration. For use with local auth for refresh.",
+          "description": "Client Id of Azure application registration.",
+          "scope": "resource"
+        },
+        "webRM.appTenantId": {
+          "type": "string",
+          "default": "",
+          "description": "Tenant Id of Azure application registration. (LEAVE BLANK FOR MULTI-TENANT APP REGISTRATIONS)",
           "scope": "resource"
         },
         "webRM.connectionInfoFolder": {
@@ -146,6 +152,12 @@
           "type": "string",
           "default": "",
           "description": "Filter the list of available solutions to those that contain this string.",
+          "scope": "resource"
+        },
+        "webRM.solutionSortAscending": {
+          "type": "boolean",
+          "default": "true",
+          "description": "Sort solution results in ascending order.",
           "scope": "resource"
         }
       }
