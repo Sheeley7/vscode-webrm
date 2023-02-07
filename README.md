@@ -14,12 +14,12 @@ You must create an app registration that has impersonation rights for Dynamics C
 
 This extension contributes the following settings:
 
-- `webRM.appClientId`: (REQUIRED) Client Id of Your Registered App in Azure
-- `webRM.appTenantId`: (REQUIRED FOR SINGLE TENANT APPS) Tenant Id of Your Registered App in Azure. Leave Blank if Mult-Tenant
-- `webRM.connectionInfoFolder`: (REQUIRED) Folder to Store Encryped Connection Info
+- `webRM.appClientId`: (REQUIRED) Client Id of your registered app in Azure
+- `webRM.appTenantId`: (REQUIRED FOR SINGLE TENANT APPS) Tenant Id of your registered app in Azure. Leave blank if Mult-Tenant
+- `webRM.connectionInfoFolder`: (REQUIRED) Folder to store encrypted connection info
 - `webRM.dynamicsAPIVersion`: (REQUIRED) API Version for Dynamics 365 Web API
-- `webRM.solutionNameFilter`: Used to Filter Solution List Retrieved from Dynamics
-- `webRM.solutionSortAscending`: Used to Change Sort Order of Returned Solution List
+- `webRM.solutionNameFilter`: Used to filter solution list retrieved from Dynamics
+- `webRM.solutionSortAscending`: Used to change sort order of returned solution list
 
 ## Known Issues
 
@@ -31,7 +31,7 @@ Currently, this extension only works for Dynamics 365 Online. I have not tested 
 
 Updated to MSAL library for authentication.
 
-### 1.0.0
+### 1.0.1
 
 Initial release with updated authentication libraries
 
@@ -39,13 +39,13 @@ Initial release with updated authentication libraries
 
 ### Config App Registration
 
-Make sure user impersonation is check when adding Dynamics 365 permissions.
+Make sure user impersonation is checked when adding Dynamics 365 permissions.
 ![png](instructions/app_registration_permissions.png)
 
 Make sure http://localhost is added to redirect uri for "Desktop Application"
 ![png](instructions/app_registration_redirect.png)
 
-Don't forget to add the required configration settings from your app registration to the vscode extensions.
+Don't forget to add the required configuration settings from your app registration to the vscode extension settings.
 
 ### Add Connection
 
