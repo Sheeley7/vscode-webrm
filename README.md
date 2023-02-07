@@ -31,9 +31,9 @@ Currently, this extension only works for Dynamics 365 Online. I have not tested 
 
 Updated to MSAL library for authentication.
 
-### 0.0.17
+### 1.0.0
 
-Initial pre-release.
+Initial release with updated authentication libraries
 
 ## How to Use
 
