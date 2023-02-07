@@ -14,8 +14,8 @@ You must create an app registration that has impersonation rights for Dynamics C
 
 This extension contributes the following settings:
 
-- `webRM.appClientId`: (REQUIRED) API Version for Dynamics 365 Web API
-- `webRM.appTenantId`: API Version for Dynamics 365 Web API (REQUIRED IF NOT USING MULTI-TENANT APP REGISTRATION)
+- `webRM.appClientId`: (REQUIRED) Client Id of Your Registered App in Azure
+- `webRM.appTenantId`: (REQUIRED FOR SINGLE TENANT APPS) Tenant Id of Your Registered App in Azure. Leave Blank if Mult-Tenant
 - `webRM.connectionInfoFolder`: (REQUIRED) Folder to Store Encryped Connection Info
 - `webRM.dynamicsAPIVersion`: (REQUIRED) API Version for Dynamics 365 Web API
 - `webRM.solutionNameFilter`: Used to Filter Solution List Retrieved from Dynamics
