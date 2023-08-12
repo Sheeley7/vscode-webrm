@@ -34,6 +34,14 @@ export function activate(context: vscode.ExtensionContext) {
             return;
         }
 
+        const wsf = vscode.workspace?.workspaceFolders || [];
+        if (wsf.length < 1) {
+            vscode.window.showErrorMessage(
+                "You must be working inside a folder/workspace to use this extension."
+            );
+            return;
+        }
+
         statusBar = vscode.window.createStatusBarItem(
             vscode.StatusBarAlignment.Left,
             100
@@ -231,21 +239,29 @@ export function activate(context: vscode.ExtensionContext) {
                 }
                 let fullFilePath = basePath + "/" + fileName;
                 fullFilePath = path.normalize(fullFilePath).toString();
+                let currentConnection =
+                    connectionStatusController.getCurrentConnection();
+                if (currentConnection !== undefined) {
+                    let con: Connection = currentConnection;
 
-                let res = await fs.promises.writeFile(
-                    fullFilePath,
-                    webResource.webResourceContent,
-                    { encoding: "base64" }
-                );
-                var openPath = fullFilePath;
-                vscode.workspace.openTextDocument(openPath).then((doc) => {
-                    vscode.window.showTextDocument(doc);
-                });
+                    await CrmWebAPI.getWebResourceContent(con, webResource);
+                    let res = await fs.promises.writeFile(
+                        fullFilePath,
+                        webResource.webResourceContent,
+                        { encoding: "base64" }
+                    );
+                    var openPath = fullFilePath;
+                    vscode.workspace.openTextDocument(openPath).then((doc) => {
+                        vscode.window.showTextDocument(doc);
+                    });
 
-                connectionStatusController.addSyncedWebResource(
-                    fullFilePath,
-                    webResource.webResourceId
-                );
+                    connectionStatusController.addSyncedWebResource(
+                        fullFilePath,
+                        webResource.webResourceId
+                    );
+                } else {
+                    //No connection has been established
+                }
             }
         );
 

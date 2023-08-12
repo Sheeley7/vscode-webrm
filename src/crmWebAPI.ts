@@ -49,81 +49,56 @@ export class CrmWebAPI {
         return solutionObjs;
     }
 
+    static async getWebResourceContent(
+        connection: Connection,
+        webResource: WebResource
+    ) {
+        let apiVersion = getConfig().get("dynamicsAPIVersion");
+        //https://orgbfed4c49.crm.dynamics.com/api/data/v9.1/webresourceset(da71b69a-e9a3-ed11-aad1-000d3a8d9962)?$select=content
+        var select = `/api/data/v${apiVersion}/webresourceset(${webResource.getWebResourceId()})?$select=content`;
+        const webResouceRecord = await this.getRecord(connection, select);
+        console.log(webResouceRecord);
+        webResource.webResourceContent = webResouceRecord.content;
+    }
+
     static async getWebResources(connection: Connection, solution: Solution) {
         let apiVersion = getConfig().get("dynamicsAPIVersion");
+        var wrSelect = `/api/data/v${apiVersion}/msdyn_solutioncomponentsummaries?$select=msdyn_name,msdyn_objectid&$filter=(msdyn_solutionid eq ${solution.solutionId}) and ((msdyn_componenttype eq 61))&$orderby=msdyn_name asc`;
+        const webResources = await this.getRecords(connection, wrSelect);
 
-        let solutionItems = await this.getRecords(
-            connection,
-            "/api/data/v" +
-                apiVersion +
-                "/solutioncomponents?$select=objectid&$filter=_solutionid_value eq " +
-                solution.getSolutionId() +
-                " and  componenttype eq 61"
-        );
-
-        const chunked_arr = [];
-        let index = 0;
-        while (index < solutionItems.length) {
-            chunked_arr.push(solutionItems.slice(index, 20 + index));
-            index += 20;
-        }
-        var wrSelect =
-            "/api/data/v" +
-            apiVersion +
-            "/webresourceset?$select=content,contentjson,description,displayname,iscustomizable,ismanaged,name,webresourceid,webresourceidunique&$filter=";
-        var requests = [];
-        for (var i = 0; i < chunked_arr.length; i++) {
-            var filter = "";
-            for (var j = 0; j < chunked_arr[i].length; j++) {
-                if (j === 0) {
-                    filter = "webresourceid eq " + chunked_arr[i][j].objectid;
-                } else {
-                    filter +=
-                        " or webresourceid eq " + chunked_arr[i][j].objectid;
-                }
-            }
-            requests.push(this.getRecords(connection, wrSelect + filter));
-        }
-
-        let webResources = await Promise.all(requests);
         const webResourceResults: WebResource[] = [];
 
         try {
-            let basePath: string =
-                vscode.workspace.rootPath === undefined
-                    ? ""
-                    : vscode.workspace.rootPath;
-            //let webResourceLookup: any = {};
-            for (i = 0; i < webResources.length; i++) {
-                let currentBlock = webResources[i];
-                if (typeof currentBlock === "undefined") {
-                    continue;
-                }
-                for (j = 0; j < currentBlock.length; j++) {
-                    let currWebResource = currentBlock[j];
-                    let filePath = currWebResource.name.split("/");
-                    let fileName = filePath.pop();
-                    let folderPath = basePath;
-                    let fullFilePath = folderPath + "/" + fileName;
-                    fullFilePath = path.normalize(fullFilePath).toString();
+            let folders = vscode.workspace.workspaceFolders;
+            let [
+                {
+                    uri: { path: basePath },
+                },
+            ] = vscode.workspace?.workspaceFolders || [{ uri: { path: "" } }];
 
-                    webResourceResults.push(
-                        new WebResource(
-                            currWebResource.name,
-                            currWebResource.webresourceid,
-                            fileName,
-                            fullFilePath,
-                            currWebResource.content,
-                            "file"
-                        )
-                    );
-                }
+            for (let i = 0; i < webResources.length; i++) {
+                let currWebResource = webResources[i];
+                let filePath = currWebResource.msdyn_name.split("/");
+                let fileName = filePath.pop();
+                let folderPath = basePath;
+                let fullFilePath = folderPath + "/" + fileName;
+                fullFilePath = path?.normalize(fullFilePath).toString() || "";
+
+                webResourceResults.push(
+                    new WebResource(
+                        currWebResource.msdyn_name,
+                        currWebResource.msdyn_objectid,
+                        fileName,
+                        fullFilePath,
+                        "",
+                        "file"
+                    )
+                );
             }
             return webResourceResults;
         } catch (err: any) {
             throw new Error(err);
         }
-        return webResourceResults;
     }
 
     static async publishWebResource(
@@ -172,6 +147,35 @@ export class CrmWebAPI {
                 }
                 try {
                     var result = JSON.parse(body).value;
+                    resolve(result);
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        });
+    }
+
+    private static async getRecord(connection: Connection, select: string) {
+        return new Promise<any>(function (resolve, reject) {
+            var headers = {
+                "OData-MaxVersion": "4.0",
+                "OData-Version": "4.0",
+                Accept: "application/json",
+                "Content-Type": "application/json; charset=utf-8",
+                Prefer: 'odata.include-annotations="*"',
+                Authorization: "Bearer " + connection.getAccessToken(),
+            };
+            var options = {
+                url: connection.getConnectionURL() + select,
+                method: "GET",
+                headers: headers,
+            };
+            request(options, (err: any, res: any, body: any) => {
+                if (err) {
+                    return reject(err);
+                }
+                try {
+                    var result = JSON.parse(body);
                     resolve(result);
                 } catch (e) {
                     reject(e);

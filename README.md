@@ -33,11 +33,15 @@ Updated to MSAL library for authentication.
 
 ### 1.0.1
 
-Initial release with updated authentication libraries
+Initial release with updated authentication libraries.
 
 ### 1.1.0
 
 Added feature for adding and removing solutions as favorites by right clicking them.
+
+### 1.1.1
+
+Updated code for web resource retrieval.
 
 ## How to Use
 
