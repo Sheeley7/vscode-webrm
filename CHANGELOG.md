@@ -2,6 +2,9 @@
 
 - Pre-Release
 
-## [Unreleased]
+## [1.0.1]
 
 - Initial release
+
+## [1.1.0]
+- Added feature for adding and removing solutions as favorites by right clicking

@@ -35,6 +35,10 @@ Updated to MSAL library for authentication.
 
 Initial release with updated authentication libraries
 
+### 1.1.0
+
+Added feature for adding and removing solutions as favorites by right clicking them.
+
 ## How to Use
 
 ### Config App Registration
