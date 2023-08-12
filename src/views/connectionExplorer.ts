@@ -9,191 +9,194 @@ import * as fs from "fs";
 const serviceName = "vscode-webrm";
 
 export class ConnectionExplorer implements vscode.TreeDataProvider<Connection> {
-  private connections: Connection[] = [];
+    private connections: Connection[] = [];
 
-  constructor(private globalContext: vscode.ExtensionContext) {
-    var connections = globalContext.globalState.get<any[]>("connections", []);
-    for (var i = 0; i < connections.length; i++) {
-      let connection = new Connection(
-        connections[i],
-        vscode.TreeItemCollapsibleState.None
-      );
-      this.connections.push(connection);
+    constructor(private globalContext: vscode.ExtensionContext) {
+        var connections = globalContext.globalState.get<any[]>(
+            "connections",
+            []
+        );
+        for (var i = 0; i < connections.length; i++) {
+            let connection = new Connection(
+                connections[i],
+                vscode.TreeItemCollapsibleState.None
+            );
+            this.connections.push(connection);
+        }
     }
-  }
 
-  private _onDidChangeTreeData: vscode.EventEmitter<any> =
-    new vscode.EventEmitter<any>();
-  readonly onDidChangeTreeData: vscode.Event<any> =
-    this._onDidChangeTreeData.event;
-  getTreeItem(
-    element: Connection
-  ): vscode.TreeItem | Thenable<vscode.TreeItem> {
-    return element;
-  }
-
-  getChildren(element?: Connection): vscode.ProviderResult<Connection[]> {
-    return this.connections;
-  }
-
-  async addItem(name: string, url: string) {
-    if (
-      this.connections.findIndex((c) => {
-        return c.getConnectionName() === name;
-      }) === -1
-    ) {
-      let connection = new Connection(
-        { connectionName: name, connectionURL: url },
-        vscode.TreeItemCollapsibleState.None
-      );
-      this.connections.push(connection);
-      await this.globalContext.globalState.update(
-        "connections",
-        this.connections
-      );
-      this.refresh();
-      return true;
-    } else {
-      return false;
+    private _onDidChangeTreeData: vscode.EventEmitter<any> =
+        new vscode.EventEmitter<any>();
+    readonly onDidChangeTreeData: vscode.Event<any> =
+        this._onDidChangeTreeData.event;
+    getTreeItem(
+        element: Connection
+    ): vscode.TreeItem | Thenable<vscode.TreeItem> {
+        return element;
     }
-  }
 
-  async refreshConnectionsGlobalState() {
-    await this.globalContext.globalState.update(
-      "connections",
-      this.connections
-    );
-  }
+    getChildren(element?: Connection): vscode.ProviderResult<Connection[]> {
+        return this.connections;
+    }
 
-  async removeItem(connectionToRemove: Connection) {
-    let connectionToRemoveId = connectionToRemove.getConnectionId();
-    this.connections = this.connections.filter((connection) => {
-      return connection.getConnectionId() !== connectionToRemoveId;
-    });
-    connectionToRemove.deleteConnection();
-    await this.globalContext.globalState.update(
-      "connections",
-      this.connections
-    );
-    this.refresh();
-  }
+    async addItem(name: string, url: string) {
+        if (
+            this.connections.findIndex((c) => {
+                return c.getConnectionName() === name;
+            }) === -1
+        ) {
+            let connection = new Connection(
+                { connectionName: name, connectionURL: url },
+                vscode.TreeItemCollapsibleState.None
+            );
+            this.connections.push(connection);
+            await this.globalContext.globalState.update(
+                "connections",
+                this.connections
+            );
+            this.refresh();
+            return true;
+        } else {
+            return false;
+        }
+    }
 
-  refresh(): void {
-    this._onDidChangeTreeData.fire(null);
-  }
+    async refreshConnectionsGlobalState() {
+        await this.globalContext.globalState.update(
+            "connections",
+            this.connections
+        );
+    }
+
+    async removeItem(connectionToRemove: Connection) {
+        let connectionToRemoveId = connectionToRemove.getConnectionId();
+        this.connections = this.connections.filter((connection) => {
+            return connection.getConnectionId() !== connectionToRemoveId;
+        });
+        connectionToRemove.deleteConnection();
+        await this.globalContext.globalState.update(
+            "connections",
+            this.connections
+        );
+        this.refresh();
+    }
+
+    refresh(): void {
+        this._onDidChangeTreeData.fire(null);
+    }
 }
 
 export class Connection extends vscode.TreeItem {
-  public contextValue: string = "connection";
-  public label: string;
-  public collapsibleState: vscode.TreeItemCollapsibleState;
+    public contextValue: string = "connection";
+    public label: string;
+    public collapsibleState: vscode.TreeItemCollapsibleState;
 
-  private connectionName: string;
-  private connectionURL: string;
-  #accessToken: string;
-  #tokenExpiration: Date;
+    private connectionName: string;
+    private connectionURL: string;
+    #accessToken: string;
+    #tokenExpiration: Date;
 
-  private connectionId: string;
-  private intialized: boolean;
-  private authProvider: AuthProvider;
+    private connectionId: string;
+    private intialized: boolean;
+    private authProvider: AuthProvider;
 
-  constructor(
-    connectionObj: any,
-    collapsibleState: vscode.TreeItemCollapsibleState
-  ) {
-    super(connectionObj.connectionName, collapsibleState);
-
-    this.label = connectionObj.connectionName;
-    this.connectionName = connectionObj.connectionName;
-    this.connectionURL = connectionObj.connectionURL;
-    this.#accessToken = "";
-    this.#tokenExpiration = new Date("1995-12-17T03:24:00");
-    //this.#accountInfoString = "";
-    this.intialized = false;
-
-    if (
-      connectionObj.connectionId === null ||
-      typeof connectionObj.connectionId === "undefined" ||
-      connectionObj.connectionId === ""
+    constructor(
+        connectionObj: any,
+        collapsibleState: vscode.TreeItemCollapsibleState
     ) {
-      this.connectionId = uuidv1().replace(/-/g, "");
-    } else {
-      this.connectionId = connectionObj.connectionId;
+        super(connectionObj.connectionName, collapsibleState);
+
+        this.label = connectionObj.connectionName;
+        this.connectionName = connectionObj.connectionName;
+        this.connectionURL = connectionObj.connectionURL;
+        this.#accessToken = "";
+        this.#tokenExpiration = new Date("1995-12-17T03:24:00");
+        //this.#accountInfoString = "";
+        this.intialized = false;
+
+        if (
+            connectionObj.connectionId === null ||
+            typeof connectionObj.connectionId === "undefined" ||
+            connectionObj.connectionId === ""
+        ) {
+            this.connectionId = uuidv1().replace(/-/g, "");
+        } else {
+            this.connectionId = connectionObj.connectionId;
+        }
+
+        this.authProvider = new AuthProvider(
+            this.connectionURL,
+            this.connectionId,
+            this.connectionName
+        );
+
+        this.collapsibleState = collapsibleState;
     }
 
-    this.authProvider = new AuthProvider(
-      this.connectionURL,
-      this.connectionId,
-      this.connectionName
-    );
+    async connect() {
+        let connectionSuccessful = false;
 
-    this.collapsibleState = collapsibleState;
-  }
+        if (this.getTokenExpiration() < new Date()) {
+            const authResult = await this.authProvider.login();
 
-  async connect() {
-    let connectionSuccessful = false;
+            if (authResult === null) {
+                throw "AuthError";
+                4;
+            }
 
-    if (this.getTokenExpiration() < new Date()) {
-      const authResult = await this.authProvider.login();
+            this.setAccessToken(authResult.accessToken);
+            this.setTokenExpiration(authResult.expiresOn);
 
-      if (authResult === null) {
-        throw "AuthError";
-        4;
-      }
+            connectionSuccessful = true;
 
-      this.setAccessToken(authResult.accessToken);
-      this.setTokenExpiration(authResult.expiresOn);
+            this.intialized = true;
+        }
+        //Otherwise return connection successful as we already have tokens that are not expired
+        else {
+            connectionSuccessful = true;
+        }
 
-      connectionSuccessful = true;
-
-      this.intialized = true;
-    }
-    //Otherwise return connection successful as we already have tokens that are not expired
-    else {
-      connectionSuccessful = true;
+        return connectionSuccessful;
     }
 
-    return connectionSuccessful;
-  }
+    public async deleteConnection() {
+        let connectionFolder: string =
+            getConfig().get("connectionInfoFolder") || "";
+        if (connectionFolder.endsWith("/") || connectionFolder.endsWith("\\")) {
+            connectionFolder = connectionFolder.slice(0, -1);
+        }
+        //Delete connection file from file system
+        const fileName = `${connectionFolder}/${this.connectionName}-${this.connectionId}.json`;
 
-  public async deleteConnection() {
-    let connectionFolder: string =
-      getConfig().get("connectionInfoFolder") || "";
-    if (connectionFolder.endsWith("/") || connectionFolder.endsWith("\\")) {
-      connectionFolder = connectionFolder.slice(0, -1);
+        try {
+            fs.unlinkSync(fileName);
+        } catch (error) {
+            console.log("could not delete file");
+        }
     }
-    //Delete connection file from file system
-    const fileName = `${connectionFolder}/${this.connectionName}-${this.connectionId}.json`;
 
-    try {
-      fs.unlinkSync(fileName);
-    } catch (error) {
-      console.log("could not delete file");
+    public getConnectionName() {
+        return this.connectionName;
     }
-  }
+    public getConnectionURL() {
+        return this.connectionURL;
+    }
+    public getAccessToken() {
+        return this.#accessToken;
+    }
+    public setAccessToken(newToken: string) {
+        this.#accessToken = newToken;
+    }
 
-  public getConnectionName() {
-    return this.connectionName;
-  }
-  public getConnectionURL() {
-    return this.connectionURL;
-  }
-  public getAccessToken() {
-    return this.#accessToken;
-  }
-  public setAccessToken(newToken: string) {
-    this.#accessToken = newToken;
-  }
-
-  public setTokenExpiration(newDate: Date | null) {
-    const dateNowPlus1Hour = new Date();
-    dateNowPlus1Hour.setMinutes(dateNowPlus1Hour.getMinutes() + 58);
-    this.#tokenExpiration = newDate || dateNowPlus1Hour;
-  }
-  public getTokenExpiration() {
-    return this.#tokenExpiration;
-  }
-  public getConnectionId() {
-    return this.connectionId;
-  }
+    public setTokenExpiration(newDate: Date | null) {
+        const dateNowPlus1Hour = new Date();
+        dateNowPlus1Hour.setMinutes(dateNowPlus1Hour.getMinutes() + 58);
+        this.#tokenExpiration = newDate || dateNowPlus1Hour;
+    }
+    public getTokenExpiration() {
+        return this.#tokenExpiration;
+    }
+    public getConnectionId() {
+        return this.connectionId;
+    }
 }

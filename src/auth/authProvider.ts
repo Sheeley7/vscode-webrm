@@ -10,7 +10,6 @@ import {
   DataProtectionScope,
   PersistenceCreator,
   PersistenceCachePlugin,
-  FilePersistence,
 } from "@azure/msal-node-extensions";
 
 import { getConfig } from "./../extension";

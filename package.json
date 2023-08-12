@@ -56,6 +56,14 @@
       {
         "command": "wrm.openWebResource",
         "title": "Open"
+      },
+      {
+        "command": "wrm.addFavoriteSolution",
+        "title": "Add Favorite"
+      },
+      {
+        "command": "wrm.removeFavoriteSolution",
+        "title": "Remove Favorite"
       }
     ],
     "viewsContainers": {
@@ -111,6 +119,14 @@
           "command": "wrm.getWebResources",
           "when": "view == vscode-solution-explorer && viewItem == solution",
           "group": "inline"
+        },
+        {
+          "command": "wrm.addFavoriteSolution",
+          "when": "view == vscode-solution-explorer && viewItem == solution"
+        },
+        {
+          "command": "wrm.removeFavoriteSolution",
+          "when": "view == vscode-solution-explorer && viewItem == solution"
         },
         {
           "command": "wrm.openWebResource",
