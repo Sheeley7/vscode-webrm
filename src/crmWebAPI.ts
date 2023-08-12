@@ -54,7 +54,7 @@ export class CrmWebAPI {
         webResource: WebResource
     ) {
         let apiVersion = getConfig().get("dynamicsAPIVersion");
-        //https://orgbfed4c49.crm.dynamics.com/api/data/v9.1/webresourceset(da71b69a-e9a3-ed11-aad1-000d3a8d9962)?$select=content
+
         var select = `/api/data/v${apiVersion}/webresourceset(${webResource.getWebResourceId()})?$select=content`;
         const webResouceRecord = await this.getRecord(connection, select);
         console.log(webResouceRecord);
