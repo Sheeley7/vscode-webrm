@@ -39,7 +39,7 @@ Initial release with updated authentication libraries.
 
 Added feature for adding and removing solutions as favorites by right clicking them.
 
-### 1.1.1
+### 1.1.2
 
 Updated code for web resource retrieval.
 
