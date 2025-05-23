@@ -133,9 +133,6 @@ export function activate(context: vscode.ExtensionContext): void {
         // Add the status bar item to subscriptions to ensure it's disposed upon deactivation.
         context.subscriptions.push(statusBar);
 
-        // Notify the user that the extension is active.
-        vscode.window.showInformationMessage("Web Resource Manager for Dynamics 365 is now active.");
-
     } catch (error: unknown) {
         // Catch any unexpected errors during activation.
         const message = error instanceof Error ? error.message : String(error);
