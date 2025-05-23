@@ -158,6 +158,9 @@ export class ConnectionExplorer implements vscode.TreeDataProvider<Connection> {
     }
 }
 
+/** Threshold in minutes before token expiry to attempt proactive renewal. */
+const TOKEN_EXPIRATION_BUFFER_MINUTES = 5;
+
 /**
  * Represents a single Dynamics 365 connection item in the Connection Explorer view.
  * Extends vscode.TreeItem to be directly usable by the TreeDataProvider.
@@ -224,31 +227,52 @@ export class Connection extends vscode.TreeItem {
 
     /**
      * Connects to the Dynamics 365 environment associated with this connection.
-     * Handles token acquisition (silent or interactive) via the AuthProvider.
-     * @returns {Promise<boolean>} A promise that resolves to `true` if connection (authentication) is successful, `false` otherwise (though it now throws on failure).
-     * @throws {Error} If authentication fails (e.g., user cancellation, invalid credentials, MSAL errors).
+     * Handles token acquisition and proactive renewal. If the current token is expired
+     * or within the renewal buffer period, a new token is acquired.
+     * @returns {Promise<boolean>} A promise that resolves to `true` if connection/token validation is successful.
+     * @throws {Error} If authentication or token renewal fails.
      * @async
      */
     async connect(): Promise<boolean> {
-        // Check if the current token is undefined or expired.
-        if (!this.#tokenExpiration || this.#tokenExpiration < new Date()) {
-            // If no valid token, attempt to login via AuthProvider.
+        const now = new Date();
+        const currentTokenExpiry = this.getTokenExpiration();
+        let renewalThresholdTime: Date | null = null;
+
+        if (currentTokenExpiry) {
+            renewalThresholdTime = new Date(currentTokenExpiry.getTime() - TOKEN_EXPIRATION_BUFFER_MINUTES * 60 * 1000);
+        }
+
+        // Condition for renewal:
+        // 1. No token expiration date is set (implies first-time login or state loss).
+        // 2. Token has expired (current time is past expiration time).
+        // 3. Token is within the proactive renewal buffer (current time is past the threshold time).
+        if (!currentTokenExpiry || now > currentTokenExpiry || (renewalThresholdTime && now > renewalThresholdTime)) {
+            if (currentTokenExpiry) {
+                console.log(`Token for ${this.connectionName} requires renewal (expired or within ${TOKEN_EXPIRATION_BUFFER_MINUTES} min buffer). Current expiry: ${currentTokenExpiry}. Attempting renewal.`);
+            } else {
+                console.log(`No token expiry found for ${this.connectionName}. Attempting login/renewal.`);
+            }
+            
             const authResult: AuthenticationResult | null = await this.authProvider.login();
 
             // Validate the authentication result.
             if (authResult === null || !authResult.accessToken || !authResult.expiresOn) {
-                throw new Error("Authentication failed. Unable to retrieve a valid access token or expiration date.");
+                // AuthProvider.login() is expected to throw on critical failures based on prior refactoring.
+                // This explicit throw handles cases where it might return null without throwing for some reason.
+                throw new Error(`Authentication failed for connection "${this.connectionName}". Unable to retrieve a valid access token or expiration date.`);
             }
 
             // Store the new token and its expiration date.
             this.setAccessToken(authResult.accessToken);
-            this.setTokenExpiration(authResult.expiresOn);
-            this.initialized = true; // Mark AuthProvider as initialized for this connection.
-            return true; // Connection successful.
+            this.setTokenExpiration(authResult.expiresOn); // expiresOn from MSAL should be a non-null Date.
+            console.log(`Token for ${this.connectionName} successfully renewed/acquired. New expiry: ${this.getTokenExpiration()}`);
         } else {
-            // Token is still valid and not expired.
-            return true; // Connection considered successful.
+            // Token is still valid and not within the renewal buffer.
+            console.log(`Token for ${this.connectionName} is still valid. Expiry: ${this.getTokenExpiration()}`);
         }
+
+        this.initialized = true; // Mark as initialized (or re-initialized).
+        return true; // Connection and token validation successful.
     }
 
     /**
@@ -329,9 +353,11 @@ export class Connection extends vscode.TreeItem {
         } else {
             // Fallback if null is passed, though MSAL's authResult.expiresOn should always be a Date.
             // Setting a default expiration slightly less than an hour for safety margin.
+            // This fallback might be less relevant if authResult.expiresOn is guaranteed to be a Date.
             const dateNowPlusShortExpiry = new Date();
             dateNowPlusShortExpiry.setMinutes(dateNowPlusShortExpiry.getMinutes() + 58); // e.g., 58 minutes
             this.#tokenExpiration = dateNowPlusShortExpiry;
+            console.warn(`Token expiration date was null, using fallback: ${this.#tokenExpiration}`);
         }
     }
 

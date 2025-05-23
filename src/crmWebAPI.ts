@@ -273,15 +273,35 @@ export class CrmWebAPI {
         apiQuery: string, // Renamed 'select' to 'apiQuery' for clarity as it's more than just $select
         jsonPayload?: TRequestPayload 
     ): Promise<TResponsePayload> {
-        return new Promise<TResponsePayload>((resolve, reject) => {
-            // Common OData headers.
-            const headers = {
-                "OData-MaxVersion": ODATA_MAX_VERSION,
+        // Wrap the existing Promise logic in an async IIFE to use await for connection.connect()
+        return (async () => {
+            try {
+                // Ensure the connection is active and token is valid/renewed before making the API call.
+                await connection.connect(); 
+            } catch (error: unknown) {
+                // If connection.connect() fails (e.g., authProvider.login() fails),
+                // it should throw an error. We need to propagate this.
+                console.error("Token renewal/validation failed prior to API request in makeApiRequest:", error);
+                const message = error instanceof Error ? error.message : String(error);
+                // Reject the promise that makeApiRequest returns
+                throw new Error(`Connection validation/token renewal failed: ${message}`);
+            }
+
+            // Original Promise logic for the actual HTTP request
+            return new Promise<TResponsePayload>((resolve, reject) => {
+                // Common OData headers.
+                const accessToken = connection.getAccessToken();
+                if (!accessToken) {
+                    // This case should ideally be prevented by connection.connect() throwing an error.
+                    return reject(new Error("No access token available for API request. Please connect first."));
+                }
+                const headers = {
+                    "OData-MaxVersion": ODATA_MAX_VERSION,
                 "OData-Version": ODATA_VERSION,
                 "Accept": "application/json",
                 "Content-Type": APPLICATION_JSON_CHARSET_UTF8,
                 "Prefer": ODATA_INCLUDE_ANNOTATIONS, // Include annotations for more detailed responses.
-                "Authorization": "Bearer " + connection.getAccessToken(), // Authorization token.
+                "Authorization": "Bearer " + accessToken, // Use the fetched accessToken
             };
 
             const options: request.Options = {
@@ -318,7 +338,7 @@ export class CrmWebAPI {
                     reject(new Error(`Failed to parse API response from '${apiQuery}': ${message}`));
                 }
             });
-        });
+        })(); // Immediately invoke the async IIFE
     }
 
     /**

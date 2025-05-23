@@ -139,4 +139,45 @@ export class ConnectionStatusController {
   public getIsConnected(): boolean {
     return this.isConnected;
   }
+
+  /**
+   * Ensures that the current active connection is valid by attempting to connect (which includes token validation/renewal).
+   * Updates the status bar upon successful validation.
+   * @returns {Promise<void>} A promise that resolves if the connection is validated successfully.
+   * @throws {Error} If no active connection exists, or if the validation/token renewal process fails.
+   * @async
+   */
+  public async ensureActiveConnectionIsValid(): Promise<void> {
+    if (!this.currentConnection) {
+      // No connection has been set as active.
+      throw new Error("No active connection. Please connect to an environment first.");
+    }
+
+    try {
+      // Call the connect method on the Connection object.
+      // This method contains the logic for token validation and proactive renewal.
+      await this.currentConnection.connect(); 
+      
+      // If connect() succeeds, the token is valid or has been renewed.
+      // Update isConnected flag and status bar to reflect the confirmed connected state.
+      this.isConnected = true; 
+      this.statusBar.text = `Connected: ${this.currentConnection.getConnectionName()}`;
+      this.statusBar.tooltip = `Connected to Dynamics 365 environment: ${this.currentConnection.getConnectionName()} (${this.currentConnection.getConnectionURL()})`;
+      this.statusBar.show(); // Ensure it's visible.
+      console.log(`Active connection to '${this.currentConnection.getConnectionName()}' validated successfully.`);
+
+    } catch (error: unknown) {
+      // If this.currentConnection.connect() throws an error (e.g., token renewal failed),
+      // it means the connection is no longer valid.
+      console.error(`Failed to ensure active connection to '${this.currentConnection.getConnectionName()}' is valid:`, error);
+      
+      // Update internal state and UI to reflect that the connection is now considered invalid/failed.
+      // Calling disconnect() will reset the state and update the status bar.
+      this.disconnect(); 
+      
+      // Re-throw a new error to inform the caller about the validation failure.
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to validate active connection to '${this.currentConnection.getConnectionName()}': ${message}`);
+    }
+  }
 }
