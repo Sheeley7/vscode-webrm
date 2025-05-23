@@ -18,6 +18,64 @@ import {
 import { ConfigurationService } from "./../configurationService"; 
 import * as vscode from "vscode";
 
+// #region HTML Templates for Interactive Login
+const SUCCESS_TEMPLATE_HTML = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authentication Successful</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 40px; text-align: center; background-color: #f0f2f5; color: #333; display: flex; justify-content: center; align-items: center; height: 90vh; }
+        .container { background-color: #ffffff; padding: 40px; border-radius: 8px; box-shadow: 0 6px 12px rgba(0,0,0,0.15); display: inline-block; max-width: 500px; }
+        h1 { color: #2c8c2c; font-size: 1.8em; margin-bottom: 20px; }
+        p { font-size: 1.1em; line-height: 1.6; }
+        .close-message { margin-top: 30px; font-size: 0.95em; color: #555; }
+        .icon { font-size: 3em; color: #2c8c2c; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">✓</div>
+        <h1>Authentication Successful!</h1>
+        <p>You have successfully signed in to the Dynamics 365 Web Resource Manager extension.</p>
+        <p class="close-message">You can now close this browser window and return to VS Code.</p>
+    </div>
+</body>
+</html>
+`;
+
+const ERROR_TEMPLATE_HTML = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authentication Failed</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 40px; text-align: center; background-color: #f0f2f5; color: #333; display: flex; justify-content: center; align-items: center; height: 90vh; }
+        .container { background-color: #ffffff; padding: 40px; border-radius: 8px; box-shadow: 0 6px 12px rgba(0,0,0,0.15); display: inline-block; max-width: 500px; }
+        h1 { color: #d93025; font-size: 1.8em; margin-bottom: 20px; }
+        p { font-size: 1.1em; line-height: 1.6; }
+        .error-details { margin-top: 20px; font-size: 0.95em; color: #555; }
+        .close-message { margin-top: 30px; font-size: 0.95em; color: #555; }
+        .icon { font-size: 3em; color: #d93025; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">✕</div>
+        <h1>Authentication Failed</h1>
+        <p>Oops! Something went wrong during the authentication process.</p>
+        <p class="error-details">Please try again. If the problem persists, check the VS Code extension output channel (Web Resource Manager) for more details or contact your administrator.</p>
+        <p class="close-message">You can close this browser window.</p>
+    </div>
+</body>
+</html>
+`;
+// #endregion HTML Templates
+
 /**
  * Options for an interactive token request.
  * @interface InteractiveTokenRequestOptions
@@ -210,8 +268,8 @@ export class AuthProvider {
           openBrowser: async (url: string) => { // VS Code specific way to open a browser.
               await vscode.commands.executeCommand("vscode.open", vscode.Uri.parse(url));
           },
-          successTemplate: "<h1>Successfully signed in!</h1> <p>You can close this window now.</p>",
-          errorTemplate: "<h1>Oops! Something went wrong</h1> <p>Check the console for more information.</p>",
+          successTemplate: SUCCESS_TEMPLATE_HTML, // Use new success template
+          errorTemplate: ERROR_TEMPLATE_HTML,     // Use new error template
       };
       // Include correlationId if provided in the original request.
       if (tokenRequest.correlationId) {
@@ -250,8 +308,8 @@ export class AuthProvider {
             openBrowser: async (url: string) => {
                 await vscode.commands.executeCommand("vscode.open", vscode.Uri.parse(url));
             },
-            successTemplate: "<h1>Successfully signed in!</h1> <p>You can close this window now.</p>",
-            errorTemplate: "<h1>Oops! Something went wrong</h1> <p>Check the console for more information.</p>",
+            successTemplate: SUCCESS_TEMPLATE_HTML, // Use new success template
+            errorTemplate: ERROR_TEMPLATE_HTML,     // Use new error template
             ...(tokenRequest.correlationId && { correlationId: tokenRequest.correlationId }), // Preserve correlationId
         };
         return await this.getTokenInteractive(interactiveRequestOptions);
@@ -276,8 +334,14 @@ export class AuthProvider {
       if (!this.clientApplication) {
         throw new Error("Client application not initialized for interactive token acquisition.");
       }
+      // Ensure our custom templates are passed if not already set in tokenRequestOptions (though getToken sets them)
+      const requestWithOptions = {
+          ...tokenRequestOptions,
+          successTemplate: tokenRequestOptions.successTemplate || SUCCESS_TEMPLATE_HTML,
+          errorTemplate: tokenRequestOptions.errorTemplate || ERROR_TEMPLATE_HTML,
+      };
       // Initiate interactive token acquisition.
-      const authResponse = await this.clientApplication.acquireTokenInteractive(tokenRequestOptions);
+      const authResponse = await this.clientApplication.acquireTokenInteractive(requestWithOptions);
       return authResponse;
     } catch (error: unknown) {
       // Log interactive errors and re-throw to be handled by the calling login() method.
