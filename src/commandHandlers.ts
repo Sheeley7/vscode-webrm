@@ -117,28 +117,100 @@ export function registerCommands(
     const wrmAddConnection = vscode.commands.registerCommand(
         "wrm.addConnection",
         async () => {
-            try {
-                const details = await getNewConnectionDetails();
-                if (!details) {
-                    // User cancelled or input was invalid, message shown in helper
-                    return; 
-                }
+            // Determine the column to show the webview in
+            const column = vscode.window.activeTextEditor
+                ? vscode.window.activeTextEditor.viewColumn
+                : undefined;
 
-                const addConnectionResult = await connectionExplorer.addItem(
-                    details.name,
-                    details.url
+            // Create and show a new webview panel
+            const panel = vscode.window.createWebviewPanel(
+                'addCrmConnection', // Identifies the type of the webview. Used internally.
+                'Add New CRM Connection', // Title of the panel displayed to the user.
+                column || vscode.ViewColumn.One, // Editor column to show the new webview panel in.
+                {
+                    enableScripts: true, // Enable JavaScript in the webview.
+                    // Restrict the webview to only loading content from our extension's directory.
+                    // localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'src', 'webviews')] 
+                    // For a single HTML file with inline CSS/JS, context.extensionUri is a broad but acceptable root.
+                    localResourceRoots: [context.extensionUri] 
+                }
+            );
+
+            // Get the path to the HTML file on disk
+            // Assuming commandHandlers.ts is in src/, and webviews/ is also in src/
+            const htmlFilePath = vscode.Uri.joinPath(context.extensionUri, 'src', 'webviews', 'newConnectionForm.html');
+            
+            try {
+                // Read the HTML content from the file
+                let htmlContent = fs.readFileSync(htmlFilePath.fsPath, 'utf8');
+                
+                // Replace placeholders for CSP source with the correct webview URI
+                // This is crucial for Content Security Policy when loading resources in the webview.
+                // Note: The placeholder ${webview.cspSource} was in the HTML; here we replace it.
+                // However, a more robust way is to use `panel.webview.asWebviewUri` for *each* resource if they were separate files.
+                // Since CSS and JS are inline in this HTML, the primary concern is script execution enabled by `enableScripts: true`
+                // and the `Content-Security-Policy` meta tag in the HTML itself.
+                // The provided HTML already contains: <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${webview.cspSource}; script-src 'unsafe-inline' ${webview.cspSource};">
+                // So, we need to replace ${webview.cspSource} with panel.webview.cspSource
+                htmlContent = htmlContent.replace(/\$\{webview.cspSource\}/g, panel.webview.cspSource);
+                
+                panel.webview.html = htmlContent;
+
+                // Handle messages from the webview (form submission, cancellation)
+                // This will be detailed in the next subtask.
+                panel.webview.onDidReceiveMessage(
+                    async message => {
+                        switch (message.command) {
+                            case 'saveConnection':
+                                try {
+                                    // Remove trailing slash from URL if present, similar to previous getNewConnectionDetails
+                                    let url = message.data.url;
+                                    if (url.endsWith("/") || url.endsWith("\\")) {
+                                        url = url.slice(0, -1);
+                                    }
+
+                                    const addConnectionResult = await connectionExplorer.addItem(
+                                        message.data.name,
+                                        url
+                                    );
+                                    if (addConnectionResult) {
+                                        vscode.window.showInformationMessage(`Connection '${message.data.name}' added successfully.`);
+                                        panel.dispose(); // Close the webview panel on success
+                                    } else {
+                                        // Send error back to webview
+                                        panel.webview.postMessage({ command: 'showError', text: 'Failed to add connection. A connection with this name might already exist or the details are invalid.' });
+                                    }
+                                } catch (error: unknown) {
+                                    const errorMsg = error instanceof Error ? error.message : String(error);
+                                    // Send error back to webview
+                                    panel.webview.postMessage({ command: 'showError', text: `Failed to add connection: ${errorMsg}` });
+                                }
+                                return;
+                            case 'cancelConnectionForm':
+                                panel.dispose(); // Close the webview panel
+                                return;
+                        }
+                    },
+                    undefined,
+                    context.subscriptions
                 );
 
-                if (!addConnectionResult) {
-                    vscode.window.showErrorMessage(
-                        "Failed to add connection. A connection with this name might already exist or the details are invalid."
-                    );
-                } else {
-                    vscode.window.showInformationMessage(`Connection '${details.name}' added successfully.`);
-                }
-            } catch (error: unknown) {
-                const message = error instanceof Error ? error.message : String(error);
-                vscode.window.showErrorMessage(`Failed to add connection: ${message}`);
+                // Handle panel disposal (e.g., when user closes it)
+                panel.onDidDispose(
+                    () => {
+                        // Clean up resources or state if needed
+                        console.log("Add Connection webview panel disposed.");
+                    },
+                    null,
+                    context.subscriptions
+                );
+
+            } catch (err: unknown) {
+                const errorMsg = err instanceof Error ? err.message : String(err);
+                console.error("Error setting up webview for Add Connection:", errorMsg);
+                vscode.window.showErrorMessage(`Failed to open Add Connection form: ${errorMsg}`);
+                panel.dispose(); // Clean up panel if HTML load or setup fails
+                return; 
             }
         }
     );
