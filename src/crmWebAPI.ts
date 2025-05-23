@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { Connection } from "./views/connectionExplorer";
-import * as request from "request";
+import fetch from 'node-fetch';
+import { Response, RequestInit } from 'node-fetch';
 import { Solution } from "./views/solutionExplorer";
 import { WebResource } from "./views/webResourceExplorer";
 import * as path from "path";
@@ -287,57 +288,63 @@ export class CrmWebAPI {
                 throw new Error(`Connection validation/token renewal failed: ${message}`);
             }
 
-            // Original Promise logic for the actual HTTP request
-            return new Promise<TResponsePayload>((resolve, reject) => {
-                // Common OData headers.
+            // New Promise logic using node-fetch
+            try {
                 const accessToken = connection.getAccessToken();
                 if (!accessToken) {
                     // This case should ideally be prevented by connection.connect() throwing an error.
-                    return reject(new Error("No access token available for API request. Please connect first."));
+                    throw new Error("No access token available for API request. Please connect first.");
                 }
-                const headers = {
+
+                const headers: { [key: string]: string } = { // node-fetch headers can be a plain object
                     "OData-MaxVersion": ODATA_MAX_VERSION,
-                "OData-Version": ODATA_VERSION,
-                "Accept": "application/json",
-                "Content-Type": APPLICATION_JSON_CHARSET_UTF8,
-                "Prefer": ODATA_INCLUDE_ANNOTATIONS, // Include annotations for more detailed responses.
-                "Authorization": "Bearer " + accessToken, // Use the fetched accessToken
-            };
+                    "OData-Version": ODATA_VERSION,
+                    "Accept": "application/json",
+                    "Content-Type": APPLICATION_JSON_CHARSET_UTF8,
+                    "Prefer": ODATA_INCLUDE_ANNOTATIONS,
+                    "Authorization": "Bearer " + accessToken,
+                };
 
-            const options: request.Options = {
-                url: connection.getConnectionURL() + apiQuery, // Full URL for the request.
-                method: method,
-                headers: headers,
-                json: jsonPayload, // The 'request' library handles JSON stringification if this is an object.
-            };
+                const options: RequestInit = {
+                    method: method,
+                    headers: headers,
+                };
 
-            // Execute the HTTP request.
-            request(options, (err: any, res: request.Response, body: any) => { // Explicitly type 'res' and 'body'
-                if (err) {
-                    // Handle request library errors (e.g., network issues).
-                    return reject(new Error(`API request failed: ${err.message || String(err)}`));
+                if (jsonPayload) {
+                    options.body = JSON.stringify(jsonPayload);
                 }
-                try {
-                    // The 'request' library with `json: true` (or if jsonPayload is an object)
-                    // often parses the JSON response body automatically.
-                    // If `body` is a string, it needs parsing. Otherwise, use as is.
-                    const result = (typeof body === 'string' ? JSON.parse(body) : body) as TResponsePayload;
-                    
-                    // Check for successful HTTP status codes (200-299).
-                    if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-                        resolve(result);
-                    } else {
-                        // Handle non-successful HTTP status codes.
-                        // Attempt to extract a more specific error message from Dynamics OData error structure.
-                        // Dynamics errors are often in `result.error.message`.
-                        const errorDetails = (result as any)?.error?.message || JSON.stringify(result);
-                        reject(new Error(`API request to '${apiQuery}' completed with status ${res.statusCode}: ${errorDetails}`));
+
+                const res: Response = await fetch(connection.getConnectionURL() + apiQuery, options);
+
+                if (res.ok) {
+                    // For PATCH (typically 204 No Content) or explicit 204, resolve with undefined as TResponsePayload
+                    if (method.toUpperCase() === "PATCH" || res.status === 204) {
+                        return undefined as unknown as TResponsePayload;
                     }
-                } catch (e: unknown) { // Catching unknown for JSON parsing errors.
-                    const message = e instanceof Error ? e.message : String(e);
-                    reject(new Error(`Failed to parse API response from '${apiQuery}': ${message}`));
+                    // For other success cases, parse JSON
+                    return await res.json() as TResponsePayload;
+                } else {
+                    // Handle non-successful HTTP status codes.
+                    let errorDetails = `Status Text: ${res.statusText}`;
+                    try {
+                        // Try to parse error details from response body if available
+                        const errorBody = await res.json(); // Or res.text() if not always JSON
+                        errorDetails = (errorBody as any)?.error?.message || JSON.stringify(errorBody);
+                    } catch (e) {
+                        // If parsing error body fails, use status text or fallback
+                        console.warn("Failed to parse error body from API response:", e);
+                        // errorDetails is already set to statusText, can append more if needed
+                        const textBody = await res.text(); // get text as fallback
+                        errorDetails = textBody || errorDetails;
+
+                    }
+                    throw new Error(`API request to '${apiQuery}' completed with status ${res.status}: ${errorDetails}`);
                 }
-            });
+            } catch (err: unknown) {
+                const message = err instanceof Error ? err.message : String(err);
+                // Ensure the promise from the IIFE is rejected
+                throw new Error(`API request failed: ${message}`);
+            }
         })(); // Immediately invoke the async IIFE
     }
 

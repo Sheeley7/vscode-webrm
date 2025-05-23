@@ -113,7 +113,7 @@ export function activate(context: vscode.ExtensionContext): void {
         // - View providers for custom tree views.
         // - Controllers for managing state (e.g., connection status).
         const connectionExplorer = new ConnectionExplorer(context);
-        const solutionExplorer = new SolutionExplorer([]); // Initialized with an empty array of solutions.
+        const solutionExplorer = new SolutionExplorer(context, []); // Initialized with an empty array of solutions.
         const webResourceExplorer = new WebResourceExplorer([]); // Initialized with an empty array of web resources.
         const connectionStatusController = new ConnectionStatusController(statusBar);
         

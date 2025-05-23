@@ -389,7 +389,7 @@ export function registerCommands(
             } catch (error: unknown) {
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(
-                    `Error adding solution '${solution.label?.replace(/^\*/, "")}' to favorites: ${message}`
+                    `Error adding solution '${solution.getFriendlyName()}' to favorites: ${message}`
                 );
             }
         }
@@ -414,7 +414,7 @@ export function registerCommands(
             } catch (error: unknown) {
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(
-                    `Error removing solution '${solution.label?.replace(/^\*/, "")}' from favorites: ${message}`
+                    `Error removing solution '${solution.getFriendlyName()}' from favorites: ${message}`
                 );
             }
         }
