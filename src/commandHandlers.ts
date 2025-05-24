@@ -134,7 +134,6 @@ export function registerCommands(
                                         url
                                     );
                                     if (addConnectionResult) {
-                                        vscode.window.showInformationMessage(`Connection '${message.data.name}' added successfully.`);
                                         panel.dispose(); // Close the webview panel on success
                                     } else {
                                         // Send error back to webview
@@ -265,7 +264,6 @@ export function registerCommands(
                         solutionExplorer.setSolutions(solutionViewModels);
                         // solutionExplorer.refresh(); // setSolutions now calls refresh
                         progress.report({ increment: 100, message: `Successfully connected to '${connection.label}'.`});
-                        vscode.window.showInformationMessage(`Successfully connected to '${connection.label}'.`);
                     }
                 );
             } catch (error: unknown) { 
@@ -320,7 +318,6 @@ export function registerCommands(
                         webResourceExplorer.setWebResources(webResources);
                         webResourceExplorer.refresh();
                         progress.report({ increment: 100, message: `Web resources for '${solution.label}' loaded.`});
-                        vscode.window.showInformationMessage(`Web resources for '${solution.label}' loaded.`);
                     }
                 );
             } catch (error: unknown) {
@@ -428,7 +425,6 @@ export function registerCommands(
                     fullFilePath,
                     webResource.webResourceId
                 );
-                vscode.window.showInformationMessage(`Web resource '${webResource.webResourceName}' opened successfully.`);
             } catch (error: unknown) {
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(`Failed to open web resource '${webResource.webResourceName}': ${message}`);
