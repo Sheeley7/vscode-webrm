@@ -246,25 +246,20 @@ export class Connection extends vscode.TreeItem {
             } else {
                 console.log(`No token expiry found for ${this.connectionName}. Attempting login/renewal.`);
             }
-            
-            const authResult: AuthenticationResult | null = await this.authProvider.login();
-
-            // Validate the authentication result.
-            if (authResult === null || !authResult.accessToken || !authResult.expiresOn) {
-                // AuthProvider.login() is expected to throw on critical failures based on prior refactoring.
-                // This explicit throw handles cases where it might return null without throwing for some reason.
-                throw new Error(`Authentication failed for connection "${this.connectionName}". Unable to retrieve a valid access token or expiration date.`);
+            // Use VS Code authentication session
+            const session = await this.authProvider.login();
+            if (!session || !session.accessToken) {
+                throw new Error(`Authentication failed for connection "${this.connectionName}". Unable to retrieve a valid access token.`);
             }
-
-            // Store the new token and its expiration date.
-            this.setAccessToken(authResult.accessToken);
-            this.setTokenExpiration(authResult.expiresOn); // expiresOn from MSAL should be a non-null Date.
+            this.setAccessToken(session.accessToken);
+            // VS Code's session does not provide an expiration, so set a default (e.g., 1 hour from now)
+            const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
+            this.setTokenExpiration(expiresAt);
             console.log(`Token for ${this.connectionName} successfully renewed/acquired. New expiry: ${this.getTokenExpiration()}`);
         } else {
             // Token is still valid and not within the renewal buffer.
             console.log(`Token for ${this.connectionName} is still valid. Expiry: ${this.getTokenExpiration()}`);
         }
-
         return true; // Connection and token validation successful.
     }
 
