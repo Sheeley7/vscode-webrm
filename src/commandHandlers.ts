@@ -576,6 +576,27 @@ export function registerCommands(
         }
     );
 
+    const wrmToggleSolutionSortOrder = vscode.commands.registerCommand(
+        "wrm.toggleSolutionSortOrder",
+        async () => {
+            try {
+                const currentSortAscending = ConfigurationService.getSolutionSortAscending();
+                const newSortAscending = !currentSortAscending;
+                await ConfigurationService.updateSetting(
+                    "solutionSortAscending", 
+                    newSortAscending, 
+                    vscode.ConfigurationTarget.Workspace
+                );
+                // The SolutionExplorer.getChildren method already reads this setting, 
+                // so we just need to refresh the view.
+                solutionExplorer.refresh(); 
+            } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : String(error);
+                vscode.window.showErrorMessage(`Error toggling solution sort order: ${message}`);
+            }
+        }
+    );
+
     // Add all registered commands to the extension's subscriptions for proper disposal on deactivation
     context.subscriptions.push(
         wrmAddConnection,
@@ -586,6 +607,7 @@ export function registerCommands(
         wrmRemoveFavoriteSolution,
         wrmOpenWebResource,
         wrmPublishWebResource,
-        wrmFilterSolutions
+        wrmFilterSolutions,
+        wrmToggleSolutionSortOrder
     );
 }
