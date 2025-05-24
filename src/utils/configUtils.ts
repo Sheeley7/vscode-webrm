@@ -12,9 +12,6 @@ export function checkClientId(): boolean {
     const clientid = ConfigurationService.getAppClientId();
     // Check if the client ID is an empty string, null, or undefined.
     if (clientid === "" || clientid === null || clientid === undefined) {
-        vscode.window.showErrorMessage(
-            "You must provide Application (Client) ID in extension settings (webRM.appClientId)."
-        );
         return false;
     }
     return true;
@@ -31,9 +28,6 @@ export function checkConfigFolder(): boolean {
     const folder = ConfigurationService.getConnectionInfoFolder();
     // Check if the folder path is an empty string, null, or undefined.
     if (folder === "" || folder === null || folder === undefined) {
-        vscode.window.showErrorMessage(
-            "You must provide a folder for connection info in extension settings (webRM.connectionInfoFolder)."
-        );
         return false;
     }
     return true;
@@ -53,9 +47,6 @@ export function checkAPIVersion(): boolean {
     // Check if the API version is an empty string, null, or undefined.
     // This also implicitly checks if the default from ConfigurationService is considered 'unset' by these criteria.
     if (webServiceAPIVersion === "" || webServiceAPIVersion === null || webServiceAPIVersion === undefined) { 
-        vscode.window.showErrorMessage(
-            "You must provide a Dynamics Web API Version in the extension settings (webRM.dynamicsAPIVersion)."
-        );
         return false;
     }
     return true;

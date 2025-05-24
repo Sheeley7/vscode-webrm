@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource} 'unsafe-inline';">
+    <title>Web Resource Manager Settings</title>
+    <style>
+        body { font-family: var(--vscode-font-family); color: var(--vscode-editor-foreground); background-color: var(--vscode-editor-background); padding: 20px; }
+        .setting { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], input[type="password"] { width: 90%; padding: 8px; border: 1px solid var(--vscode-input-border, #ccc); background-color: var(--vscode-input-background); color: var(--vscode-input-foreground); border-radius: 4px; }
+        input[type="checkbox"] { margin-right: 5px; }
+        .buttons { margin-top: 20px; }
+        button { padding: 10px 15px; margin-right: 10px; border: none; border-radius: 4px; cursor: pointer; background-color: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+        button:hover { background-color: var(--vscode-button-hoverBackground); }
+        .note { font-size: 0.9em; color: var(--vscode-descriptionForeground); }
+    </style>
+</head>
+<body>
+    <h2>Web Resource Manager Settings</h2>
+    <p>Please configure the required settings for the extension to operate correctly.</p>
+
+    <div class="setting">
+        <label for="appClientId">Application (Client) ID (Required)</label>
+        <input type="text" id="appClientId" name="appClientId">
+    </div>
+
+    <div class="setting">
+        <label for="appTenantId">Application (Tenant) ID</label>
+        <input type="text" id="appTenantId" name="appTenantId">
+        <p class="note">Required for single-tenant Azure applications. Leave blank for multi-tenant applications.</p>
+    </div>
+
+    <div class="setting">
+        <label for="connectionInfoFolder">Connection Info Folder (Required)</label>
+        <input type="text" id="connectionInfoFolder" name="connectionInfoFolder">
+        <p class="note">Path to a folder where encrypted connection strings will be stored (e.g., /Users/yourname/.vscode-webrm-connections).</p>
+    </div>
+
+    <div class="setting">
+        <label for="dynamicsAPIVersion">Dynamics API Version (Required)</label>
+        <input type="text" id="dynamicsAPIVersion" name="dynamicsAPIVersion" placeholder="e.g., 9.1">
+    </div>
+
+    <div class="setting">
+        <label for="solutionNameFilter">Solution Name Filter</label>
+        <input type="text" id="solutionNameFilter" name="solutionNameFilter" placeholder="e.g., MySolution, Contoso">
+        <p class="note">Filter the list of solutions to those containing this string (case-insensitive).</p>
+    </div>
+    
+    <div class="setting">
+        <label for="solutionSortAscending">Sort Solutions Ascending</label>
+        <input type="checkbox" id="solutionSortAscending" name="solutionSortAscending" checked>
+    </div>
+
+    <div class="buttons">
+        <button id="saveButton">Save Settings</button>
+        <button id="cancelButton">Cancel</button>
+    </div>
+
+    <script>
+        const vscode = acquireVsCodeApi();
+
+        const settingsFields = [
+            'appClientId', 'appTenantId', 'connectionInfoFolder', 
+            'dynamicsAPIVersion', 'solutionNameFilter'
+        ];
+        const checkboxFields = ['solutionSortAscending'];
+
+        // Listen for messages from the extension to pre-fill settings
+        window.addEventListener('message', event => {
+            const message = event.data;
+            if (message.command === 'loadSettings') {
+                const settings = message.settings;
+                settingsFields.forEach(fieldId => {
+                    const inputElement = document.getElementById(fieldId);
+                    if (inputElement && settings[fieldId] !== undefined) {
+                        inputElement.value = settings[fieldId];
+                    }
+                });
+                checkboxFields.forEach(fieldId => {
+                    const inputElement = document.getElementById(fieldId);
+                    if (inputElement && settings[fieldId] !== undefined) {
+                        inputElement.checked = settings[fieldId];
+                    }
+                });
+            }
+        });
+
+        document.getElementById('saveButton').addEventListener('click', () => {
+            const settings = {};
+            settingsFields.forEach(fieldId => {
+                settings[fieldId] = document.getElementById(fieldId).value;
+            });
+            checkboxFields.forEach(fieldId => {
+                settings[fieldId] = document.getElementById(fieldId).checked;
+            });
+            vscode.postMessage({ command: 'save', data: settings });
+        });
+
+        document.getElementById('cancelButton').addEventListener('click', () => {
+            vscode.postMessage({ command: 'cancel' });
+        });
+    </script>
+</body>
+</html>
