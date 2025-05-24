@@ -527,24 +527,51 @@ export function registerCommands(
     const wrmFilterSolutions = vscode.commands.registerCommand(
         "wrm.filterSolutions",
         async () => {
-            // Get current filter value from settings using ConfigurationService
             const currentFilter = ConfigurationService.getSolutionNameFilter() || "";
-            // Show input box with current value as default
             const newFilter = await vscode.window.showInputBox({
                 prompt: "Enter a filter string for solutions (case-insensitive)",
                 value: currentFilter,
                 placeHolder: "e.g. MySolution, Contoso, etc.",
                 ignoreFocusOut: true
             });
-            if (typeof newFilter === "string") {
-                // Update the setting using the ConfigurationService's updateSetting method
+
+            if (typeof newFilter === 'string') {
                 await ConfigurationService.updateSetting(
                     "solutionNameFilter",
                     newFilter,
                     vscode.ConfigurationTarget.Workspace
                 );
-                vscode.window.showInformationMessage(`Solution filter updated${newFilter ? `: '${newFilter}'` : " (cleared)"}.`);
-                solutionExplorer.refresh();
+
+                const currentCrmConnection = connectionStatusController.getCurrentConnection();
+                if (!currentCrmConnection) {
+                    vscode.window.showErrorMessage("No active connection. Please connect to an environment to apply the filter.");
+                    return;
+                }
+
+                try {
+                    await vscode.window.withProgress(
+                        {
+                            location: vscode.ProgressLocation.Notification,
+                            title: "Applying filter and refreshing solutions...",
+                            cancellable: false
+                        },
+                        async (progress) => {
+                            progress.report({ increment: 20, message: "Connecting..." });
+                            await currentCrmConnection.connect(); // Ensure token is valid
+
+                            progress.report({ increment: 50, message: "Fetching filtered solutions..." });
+                            const rawSolutions = await CrmWebAPI.getSolutions(currentCrmConnection);
+                            
+                            progress.report({ increment: 80, message: "Updating view..." });
+                            solutionExplorer.setSolutionsFromRaw(rawSolutions); // This will also call refresh
+                            
+                            progress.report({ increment: 100, message: "Filter applied." });
+                        }
+                    );
+                } catch (error: unknown) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    vscode.window.showErrorMessage(`Error applying filter: ${message}`);
+                }
             }
         }
     );
