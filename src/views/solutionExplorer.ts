@@ -181,7 +181,7 @@ export class Solution extends vscode.TreeItem {
      */
     public updateLabel(): void { // Made public for SolutionExplorer to call if needed
         if (this.isFavorite) {
-            this.label = `* ${this.solutionName}`; // Prefix with '*'
+            this.label = this.solutionName; // Remove prefix
             // Optionally, set a specific icon for favorite items
             this.iconPath = new vscode.ThemeIcon("star-full"); // Example: Filled star icon
         } else {

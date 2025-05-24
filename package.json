@@ -35,35 +35,48 @@
     "commands": [
       {
         "command": "wrm.addConnection",
-        "title": "Add Connection"
+        "title": "Add Connection",
+        "icon": "$(add)"
       },
       {
         "command": "wrm.connect",
-        "title": "Connect"
+        "title": "Connect",
+        "icon": "$(plug)"
       },
       {
         "command": "wrm.removeConnection",
-        "title": "Remove"
+        "title": "Remove",
+        "icon": "$(trash)"
       },
       {
         "command": "wrm.getWebResources",
-        "title": "Get Web Resources"
+        "title": "Get Web Resources",
+        "icon": "$(cloud-download)"
       },
       {
         "command": "wrm.publishWebResource",
-        "title": "Dynamics: Publish Web Resource"
+        "title": "Dynamics: Publish Web Resource",
+        "icon": "$(cloud-upload)"
       },
       {
         "command": "wrm.openWebResource",
-        "title": "Open"
+        "title": "Open",
+        "icon": "$(go-to-file)"
       },
       {
         "command": "wrm.addFavoriteSolution",
-        "title": "Add Favorite"
+        "title": "Add Favorite",
+        "icon": "$(star)"
       },
       {
         "command": "wrm.removeFavoriteSolution",
-        "title": "Remove Favorite"
+        "title": "Remove Favorite",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "wrm.filterSolutions",
+        "title": "Filter Solutions",
+        "icon": "$(filter)"
       }
     ],
     "viewsContainers": {
@@ -102,36 +115,49 @@
         {
           "command": "wrm.addConnection",
           "when": "view == vscode-connection-explorer",
-          "group": "navigation@1"
+          "group": "navigation@1",
+          "icon": "$(add)"
+        },
+        {
+          "command": "wrm.filterSolutions",
+          "when": "view == vscode-solution-explorer",
+          "group": "navigation@2",
+          "icon": "$(filter)"
         }
       ],
       "view/item/context": [
         {
           "command": "wrm.connect",
           "when": "view == vscode-connection-explorer && viewItem == connection",
-          "group": "inline"
+          "group": "inline",
+          "icon": "$(plug)"
         },
         {
           "command": "wrm.removeConnection",
-          "when": "view == vscode-connection-explorer && viewItem == connection"
+          "when": "view == vscode-connection-explorer && viewItem == connection",
+          "icon": "$(trash)"
         },
         {
           "command": "wrm.getWebResources",
           "when": "view == vscode-solution-explorer && viewItem == solution",
-          "group": "inline"
+          "group": "inline",
+          "icon": "$(cloud-download)"
         },
         {
           "command": "wrm.addFavoriteSolution",
-          "when": "view == vscode-solution-explorer && viewItem == solution"
+          "when": "view == vscode-solution-explorer && viewItem == solution",
+          "icon": "$(star)"
         },
         {
           "command": "wrm.removeFavoriteSolution",
-          "when": "view == vscode-solution-explorer && viewItem == solution"
+          "when": "view == vscode-solution-explorer && viewItem == solution",
+          "icon": "$(trash)"
         },
         {
           "command": "wrm.openWebResource",
           "when": "view == vscode-webresource-explorer && viewItem == webresource",
-          "group": "inline"
+          "group": "inline",
+          "icon": "$(go-to-file)"
         }
       ],
       "editor/context": []

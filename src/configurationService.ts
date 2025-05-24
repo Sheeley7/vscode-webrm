@@ -81,4 +81,15 @@ export class ConfigurationService {
     static getAppTenantId(): string | undefined {
         return this.getConfiguration().get("appTenantId");
     }
+
+    /**
+     * Updates a setting in the 'webRM' configuration section.
+     * @param {string} key The configuration key to update.
+     * @param {any} value The value to set.
+     * @param {vscode.ConfigurationTarget} [target=vscode.ConfigurationTarget.Workspace] The configuration target (default: Workspace).
+     * @returns {Thenable<void>} A promise that resolves when the update is complete.
+     */
+    static updateSetting(key: string, value: any, target: vscode.ConfigurationTarget = vscode.ConfigurationTarget.Workspace): Thenable<void> {
+        return this.getConfiguration().update(key, value, target);
+    }
 }

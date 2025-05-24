@@ -6,6 +6,7 @@ import { ConnectionStatusController } from "./connectionStatusController";
 import { CrmWebAPI } from "./crmWebAPI";
 import * as fs from "fs";
 import * as path from "path";
+import { ConfigurationService } from "./configurationService";
 
 /**
  * Prepares the local file system path for a web resource, creating necessary directories.
@@ -342,7 +343,6 @@ export function registerCommands(
             try {
                 await solution.setFavorite(); // No longer needs context, calls SolutionExplorer method
                 // solutionExplorer.refresh(); // Refresh is now handled by setFavorite potentially through SolutionExplorer
-                vscode.window.showInformationMessage(`Solution '${solution.getFriendlyName()}' added to favorites.`);
             } catch (error: unknown) {
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(
@@ -367,7 +367,6 @@ export function registerCommands(
             try {
                 await solution.removeFavorite(); // No longer needs context
                 // solutionExplorer.refresh(); // Refresh is now handled by removeFavorite potentially through SolutionExplorer
-                vscode.window.showInformationMessage(`Solution '${solution.getFriendlyName()}' removed from favorites.`);
             } catch (error: unknown) {
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(
@@ -521,6 +520,35 @@ export function registerCommands(
         }
     );
 
+    /**
+     * Command: Filter solutions by name.
+     * Updates the solution name filter and refreshes the SolutionExplorer view.
+     */
+    const wrmFilterSolutions = vscode.commands.registerCommand(
+        "wrm.filterSolutions",
+        async () => {
+            // Get current filter value from settings using ConfigurationService
+            const currentFilter = ConfigurationService.getSolutionNameFilter() || "";
+            // Show input box with current value as default
+            const newFilter = await vscode.window.showInputBox({
+                prompt: "Enter a filter string for solutions (case-insensitive)",
+                value: currentFilter,
+                placeHolder: "e.g. MySolution, Contoso, etc.",
+                ignoreFocusOut: true
+            });
+            if (typeof newFilter === "string") {
+                // Update the setting using the ConfigurationService's updateSetting method
+                await ConfigurationService.updateSetting(
+                    "solutionNameFilter",
+                    newFilter,
+                    vscode.ConfigurationTarget.Workspace
+                );
+                vscode.window.showInformationMessage(`Solution filter updated${newFilter ? `: '${newFilter}'` : " (cleared)"}.`);
+                solutionExplorer.refresh();
+            }
+        }
+    );
+
     // Add all registered commands to the extension's subscriptions for proper disposal on deactivation
     context.subscriptions.push(
         wrmAddConnection,
@@ -530,6 +558,7 @@ export function registerCommands(
         wrmAddFavoriteSolution,
         wrmRemoveFavoriteSolution,
         wrmOpenWebResource,
-        wrmPublishWebResource
+        wrmPublishWebResource,
+        wrmFilterSolutions
     );
 }
