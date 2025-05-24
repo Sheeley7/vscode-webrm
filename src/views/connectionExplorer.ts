@@ -1,7 +1,5 @@
 import * as vscode from "vscode";
 // Keytar and Express imports were commented out as unused. If needed, they should be uncommented.
-// import * as keytar from "keytar"; 
-// import e = require("express"); 
 import { v1 as uuidv1 } from "uuid";
 import { AuthProvider } from "../auth/authProvider";
 import { ConfigurationService } from "./../configurationService"; 
@@ -9,7 +7,6 @@ import * as fs from "fs";
 import { AuthenticationResult } from "@azure/msal-node"; 
 
 // serviceName constant was commented out as unused.
-// const serviceName = "vscode-webrm"; 
 
 /**
  * Interface representing the data structure for a connection object stored in global state
@@ -182,8 +179,6 @@ export class Connection extends vscode.TreeItem {
 
     /** A unique identifier for the connection. */
     private readonly connectionId: string;
-    /** Flag indicating if the connection (specifically AuthProvider) has been initialized. */
-    private initialized: boolean; 
     /** The AuthProvider instance responsible for handling authentication for this connection. */
     private readonly authProvider: AuthProvider;
 
@@ -203,7 +198,6 @@ export class Connection extends vscode.TreeItem {
         this.connectionName = connectionObj.connectionName;
         this.connectionURL = connectionObj.connectionURL;
         this.collapsibleState = collapsibleState; // Set from parameter.
-        this.initialized = false; // Initialized state of the AuthProvider for this connection.
 
         // Generate a unique ID for the connection if one is not provided.
         // This ID is used for cache keying and internal tracking.
@@ -271,7 +265,6 @@ export class Connection extends vscode.TreeItem {
             console.log(`Token for ${this.connectionName} is still valid. Expiry: ${this.getTokenExpiration()}`);
         }
 
-        this.initialized = true; // Mark as initialized (or re-initialized).
         return true; // Connection and token validation successful.
     }
 

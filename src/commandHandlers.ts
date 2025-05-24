@@ -8,46 +8,6 @@ import * as fs from "fs";
 import * as path from "path";
 
 /**
- * Prompts the user for connection name and URL to add a new Dynamics 365 connection.
- * @returns {Promise<{ name: string; url: string } | undefined>} An object with name and URL, or undefined if the user cancels.
- * @async
- */
-async function getNewConnectionDetails(): Promise<{ name: string; url: string } | undefined> {
-    // Prompt for connection name
-    const connectionName = await vscode.window.showInputBox({
-        placeHolder: "Connection Name",
-        prompt: "Enter a unique name for this Dynamics 365 connection.",
-        ignoreFocusOut: true, // Keep input box open even if focus moves
-    });
-
-    // User cancelled or entered empty name
-    if (connectionName === undefined || connectionName.trim() === "") {
-        vscode.window.showInformationMessage("Connection name not provided. Aborting add connection.");
-        return undefined;
-    }
-
-    // Prompt for connection URL
-    const connectionURL = await vscode.window.showInputBox({
-        placeHolder: "Connection URL (e.g., https://yourorg.crm.dynamics.com)",
-        prompt: "Enter the URL of the Dynamics 365 environment.",
-        ignoreFocusOut: true,
-    });
-
-    // User cancelled or entered empty URL
-    if (connectionURL === undefined || connectionURL.trim() === "") {
-        vscode.window.showInformationMessage("Connection URL not provided. Aborting add connection.");
-        return undefined;
-    }
-    
-    // Remove trailing slash from URL if present
-    let connectionURLFinal = connectionURL.trim();
-    if (connectionURLFinal.endsWith("/") || connectionURLFinal.endsWith("\\")) {
-        connectionURLFinal = connectionURLFinal.slice(0, -1);
-    }
-    return { name: connectionName.trim(), url: connectionURLFinal };
-}
-
-/**
  * Prepares the local file system path for a web resource, creating necessary directories.
  * @param {string} webResourceName The full logical name of the web resource (e.g., "new_scripts/myfolder/myscript.js").
  * @returns {Promise<string | undefined>} The normalized local file path, or undefined if path preparation fails (e.g., no workspace).
@@ -163,7 +123,7 @@ export function registerCommands(
                         switch (message.command) {
                             case 'saveConnection':
                                 try {
-                                    // Remove trailing slash from URL if present, similar to previous getNewConnectionDetails
+                                    // Remove trailing slash from URL if present
                                     let url = message.data.url;
                                     if (url.endsWith("/") || url.endsWith("\\")) {
                                         url = url.slice(0, -1);

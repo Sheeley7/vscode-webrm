@@ -18,13 +18,7 @@ export class ConnectionStatusController {
    * This is used to identify which CRM record to update when publishing a local file.
    * Example: `{"/path/to/local/script.js": "crm-guid-of-script"}`
    */
-  private webResourceLookup: Record<string, string>; 
-  /** 
-   * Stores a disposable object, such as an event listener or a subscription.
-   * This property is available for use but is not actively used in the current implementation.
-   * If used, it should be disposed of in the `disconnect` method or when the controller is disposed.
-   */
-  private disposalFunction: Disposable | undefined; 
+  private webResourceLookup: Record<string, string>;
 
   /**
    * Creates an instance of ConnectionStatusController.
@@ -106,11 +100,6 @@ export class ConnectionStatusController {
    * Updates the status bar and clears any connection-specific state.
    */
   public disconnect(): void {
-    // Dispose of any resources held by disposalFunction if it's in use.
-    if (this.disposalFunction) {
-        this.disposalFunction.dispose();
-        this.disposalFunction = undefined;
-    }
     // Clear current connection details.
     this.currentConnection = undefined;
     this.isConnected = false;
