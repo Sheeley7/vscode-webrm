@@ -516,7 +516,6 @@ export function registerCommands(
                             base64
                         );
                         progress.report({ increment: 100, message: `Successfully published '${baseName}'.`});
-                        vscode.window.showInformationMessage(`Successfully published '${baseName}'.`);
                     }
                 );
             } catch (error: unknown) {
