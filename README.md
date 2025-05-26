@@ -4,7 +4,7 @@ Dynamics 365 Web Resource Extension for Visual Studio Code.
 
 ## Features
 
-This extensions allows for connecting to Dynamics 365 to modify and publish various web resources.
+This extension allows you to connect to Dynamics 365, modify, and publish various web resources directly from VS Code.
 
 ## Requirements
 
@@ -15,7 +15,7 @@ You must create an app registration that has impersonation rights for Dynamics C
 This extension contributes the following settings:
 
 - `webRM.appClientId`: (REQUIRED) Client Id of your registered app in Azure
-- `webRM.appTenantId`: (REQUIRED FOR SINGLE TENANT APPS) Tenant Id of your registered app in Azure. Leave blank if Mult-Tenant
+- `webRM.appTenantId`: (REQUIRED FOR SINGLE TENANT APPS) Tenant Id of your registered app in Azure. Leave blank if Multi-Tenant
 - `webRM.dynamicsAPIVersion`: (REQUIRED) API Version for Dynamics 365 Web API
 - `webRM.solutionNameFilter`: Used to filter solution list retrieved from Dynamics
 - `webRM.solutionSortAscending`: Used to change sort order of returned solution list
@@ -24,31 +24,28 @@ This extension contributes the following settings:
 
 ## Limitations
 
-Currently, this extension only works for Dynamics 365 Online. I have not tested with any other versions other than 9.0+
+Currently, this extension only works for Dynamics 365 Online. It has only been tested with version 9.0+.
 
 ## Release Notes
 
-Updated to MSAL library for authentication.
-
-### 1.0.1
-
-Initial release with updated authentication libraries.
-
-### 1.1.0
-
-Added feature for adding and removing solutions as favorites by right clicking them.
-
-### 1.1.2
-
-Updated code for web resource retrieval.
+### 1.1.5
+- Removed obsolete connection info folder setting and related logic
 
 ### 1.1.4
-
 - Major code cleanup: removed unused code and files
 - Updated authentication logic and dependencies
 - Added new configuration and utility modules
 - Improved solution and web resource explorer features
 - Enhanced connection management and settings UI
+
+### 1.1.2
+- Updated code for web resource retrieval.
+
+### 1.1.0
+- Added feature for adding and removing solutions as favorites by right clicking them.
+
+### 1.0.1
+- Initial release with updated authentication libraries.
 
 ## How to Use
 
@@ -60,7 +57,7 @@ Make sure user impersonation is checked when adding Dynamics 365 permissions.
 Make sure http://localhost is added to redirect uri for "Desktop Application"
 ![png](instructions/app_registration_redirect.png)
 
-Don't forget to add the required configuration settings from your app registration to the vscode extension settings.
+Don't forget to add the required configuration settings from your app registration to the VS Code extension settings.
 
 ### Add Connection
 
