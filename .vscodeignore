@@ -9,3 +9,8 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 instructions/**
+.prettierignore
+CHANGELOG.md
+README.md
+esbuild.config.js
+node_modules/

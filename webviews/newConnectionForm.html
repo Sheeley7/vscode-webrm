@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${webview.cspSource}; script-src 'unsafe-inline' ${webview.cspSource};">
+    <title>Add New CRM Connection</title>
+    <style>
+        body {
+            font-family: var(--vscode-font-family);
+            font-weight: var(--vscode-font-weight);
+            font-size: var(--vscode-font-size);
+            color: var(--vscode-editor-foreground);
+            background-color: var(--vscode-editor-background);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center; /* Center form elements */
+        }
+        .container {
+            width: 100%;
+            max-width: 500px; /* Max width for the form */
+        }
+        .form-group {
+            margin-bottom: 18px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px; /* Increased spacing */
+            color: var(--vscode-input-placeholderForeground); 
+            font-size: var(--vscode-font-size); /* Ensure label size matches input */
+        }
+        input[type="text"], 
+        input[type="url"] {
+            width: 100%; /* Full width */
+            padding: 10px; /* Increased padding for better touch */
+            border: 1px solid var(--vscode-input-border, var(--vscode-contrastBorder, #565656)); /* Default if var not found */
+            background-color: var(--vscode-input-background);
+            color: var(--vscode-input-foreground);
+            border-radius: 5px; /* Slightly more rounded */
+            box-sizing: border-box; 
+            font-size: var(--vscode-font-size); /* Ensure font size matches body */
+        }
+        input[type="text"]:focus, 
+        input[type="url"]:focus {
+            outline: 1px solid var(--vscode-focusBorder); /* VS Code style focus */
+            border-color: var(--vscode-focusBorder); /* Change border color on focus */
+        }
+        .button-group {
+            margin-top: 25px; /* More space before buttons */
+            display: flex;
+            justify-content: flex-end; /* Align buttons to the right */
+        }
+        button {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            border: 1px solid var(--vscode-button-border, transparent); /* Optional border */
+            padding: 10px 18px; /* Slightly larger padding */
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: var(--vscode-font-size); /* Match editor font size */
+            border-radius: 5px; /* Consistent rounding */
+            cursor: pointer;
+            margin-left: 10px; /* Spacing between buttons if multiple */
+            min-width: 90px; /* Minimum width for buttons */
+        }
+        button:hover {
+            background-color: var(--vscode-button-hoverBackground);
+        }
+        button:focus {
+            outline: 1px solid var(--vscode-focusBorder);
+        }
+        button#cancelButton {
+            background-color: var(--vscode-button-secondaryBackground, var(--vscode-input-background)); /* Secondary button style */
+            color: var(--vscode-button-secondaryForeground, var(--vscode-input-foreground));
+        }
+        button#cancelButton:hover {
+            background-color: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
+        }
+        #error-message {
+            color: var(--vscode-errorForeground);
+            background-color: var(--vscode-inputValidation-errorBackground, rgba(255, 0, 0, 0.1)); /* Subtle background for error */
+            border: 1px solid var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground));
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px; /* More space if error is shown */
+            display: none; /* Hidden by default */
+            text-align: left;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        h2 {
+            text-align: center;
+            color: var(--vscode-foreground); /* General foreground for headings */
+            margin-bottom: 25px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Add New Dynamics CRM Connection</h2>
+        <div id="error-message"></div>
+        <form id="newConnectionForm">
+            <div class="form-group">
+                <label for="connectionName">Connection Name</label>
+                <input type="text" id="connectionName" name="connectionName" required aria-describedby="connectionNameHelp">
+                <small id="connectionNameHelp" style="font-size: var(--vscode-font-size); color: var(--vscode-descriptionForeground);">A unique name to identify this connection (e.g., "My Dev Environment", "Client UAT").</small>
+            </div>
+            <div class="form-group">
+                <label for="connectionUrl">Environment URL</label>
+                <input type="url" id="connectionUrl" name="connectionUrl" required placeholder="https://yourorg.crm.dynamics.com" aria-describedby="connectionUrlHelp">
+                <small id="connectionUrlHelp" style="font-size: var(--vscode-font-size); color: var(--vscode-descriptionForeground);">The base URL of your Dynamics 365 environment.</small>
+            </div>
+            <div class="button-group">
+                <button type="button" id="cancelButton">Cancel</button>
+                <button type="submit">Save Connection</button>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        (function() {
+            const vscode = acquireVsCodeApi();
+            const form = document.getElementById('newConnectionForm');
+            const connectionNameInput = document.getElementById('connectionName');
+            const connectionUrlInput = document.getElementById('connectionUrl');
+            const errorMessageDiv = document.getElementById('error-message');
+            const cancelButton = document.getElementById('cancelButton');
+
+            // Function to display errors
+            function showError(message) {
+                errorMessageDiv.textContent = message;
+                errorMessageDiv.style.display = 'block'; // Make it visible
+            }
+
+            // Function to clear errors
+            function clearError() {
+                errorMessageDiv.textContent = '';
+                errorMessageDiv.style.display = 'none'; // Hide it
+            }
+
+            form.addEventListener('submit', (event) => {
+                event.preventDefault();
+                clearError(); // Clear previous errors
+
+                const name = connectionNameInput.value.trim();
+                const url = connectionUrlInput.value.trim();
+
+                if (!name) {
+                    showError('Connection Name is required.');
+                    connectionNameInput.focus();
+                    return;
+                }
+                if (!url) {
+                    showError('Environment URL is required.');
+                    connectionUrlInput.focus();
+                    return;
+                }
+                
+                // Basic URL validation: must start with http:// or https://
+                if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                    showError('Please enter a valid URL starting with http:// or https://.');
+                    connectionUrlInput.focus();
+                    return;
+                }
+                try {
+                    const parsedUrl = new URL(url);
+                    // Optionally, further checks like ensuring it's not a relative path or has a hostname
+                    if (!parsedUrl.hostname) {
+                        showError('The URL must include a valid hostname (e.g., yourorg.crm.dynamics.com).');
+                        connectionUrlInput.focus();
+                        return;
+                    }
+                } catch (_) {
+                    showError('The Environment URL is not valid. Please check the format (e.g., https://org.crm.dynamics.com).');
+                    connectionUrlInput.focus();
+                    return;
+                }
+
+                vscode.postMessage({
+                    command: 'saveConnection',
+                    data: {
+                        name: name,
+                        url: url
+                    }
+                });
+            });
+
+            cancelButton.addEventListener('click', () => {
+                vscode.postMessage({
+                    command: 'cancelConnectionForm'
+                });
+            });
+
+            // Listen for messages from the extension
+            window.addEventListener('message', event => {
+                const message = event.data; // The json data that the extension sent
+                switch (message.command) {
+                    case 'showError':
+                        showError(message.text);
+                        break;
+                    case 'clearError':
+                        clearError();
+                        break;
+                    // Potentially handle other commands like 'loadData' if editing connections
+                }
+            });
+
+            // Set initial focus on the first input field
+            connectionNameInput.focus();
+        }());
+    </script>
+</body>
+</html>
