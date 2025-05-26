@@ -218,12 +218,6 @@
           "description": "Tenant Id of Azure application registration. (LEAVE BLANK FOR MULTI-TENANT APP REGISTRATIONS)",
           "scope": "resource"
         },
-        "webRM.connectionInfoFolder": {
-          "type": "string",
-          "default": "",
-          "description": "Folder location on disk to store encrypted connection strings.",
-          "scope": "resource"
-        },
         "webRM.solutionNameFilter": {
           "type": "string",
           "default": "",

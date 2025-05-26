@@ -18,22 +18,6 @@ export function checkClientId(): boolean {
 }
 
 /**
- * Checks if the folder for storing connection information is configured in the extension settings.
- * Displays an error message to the user if the folder path is missing.
- * The setting key is 'webRM.connectionInfoFolder'.
- *
- * @returns {boolean} Returns `true` if the connection info folder is configured, `false` otherwise.
- */
-export function checkConfigFolder(): boolean {
-    const folder = ConfigurationService.getConnectionInfoFolder();
-    // Check if the folder path is an empty string, null, or undefined.
-    if (folder === "" || folder === null || folder === undefined) {
-        return false;
-    }
-    return true;
-}
-
-/**
  * Checks if the Dynamics 365 Web API version is configured in the extension settings.
  * Displays an error message to the user if the API version is missing.
  * The setting key is 'webRM.dynamicsAPIVersion'.

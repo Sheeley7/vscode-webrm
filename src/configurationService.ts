@@ -33,15 +33,6 @@ export class ConfigurationService {
     }
 
     /**
-     * Gets the 'connectionInfoFolder' from the extension settings.
-     * This folder is used to store connection information files.
-     * @returns {string | undefined} The path to the connection info folder, or undefined if not set.
-     */
-    static getConnectionInfoFolder(): string | undefined {
-        return this.getConfiguration().get("connectionInfoFolder");
-    }
-
-    /**
      * Gets the 'dynamicsAPIVersion' from the extension settings.
      * This specifies the version of the Dynamics 365 Web API to use (e.g., "9.1", "9.2").
      * Defaults to "9.2" if not explicitly set.

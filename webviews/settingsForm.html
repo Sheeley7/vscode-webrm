@@ -33,12 +33,6 @@
     </div>
 
     <div class="setting">
-        <label for="connectionInfoFolder">Connection Info Folder (Required)</label>
-        <input type="text" id="connectionInfoFolder" name="connectionInfoFolder">
-        <p class="note">Path to a folder where encrypted connection strings will be stored (e.g., /Users/yourname/.vscode-webrm-connections).</p>
-    </div>
-
-    <div class="setting">
         <label for="dynamicsAPIVersion">Dynamics API Version (Required)</label>
         <input type="text" id="dynamicsAPIVersion" name="dynamicsAPIVersion" placeholder="e.g., 9.1">
     </div>
@@ -63,7 +57,7 @@
         const vscode = acquireVsCodeApi();
 
         const settingsFields = [
-            'appClientId', 'appTenantId', 'connectionInfoFolder', 
+            'appClientId', 'appTenantId', 
             'dynamicsAPIVersion', 'solutionNameFilter'
         ];
         const checkboxFields = ['solutionSortAscending'];

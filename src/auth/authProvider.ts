@@ -97,11 +97,6 @@ export class AuthProvider {
    * @async
    */
   async init(): Promise<void> {
-    let connectionFolder: string = ConfigurationService.getConnectionInfoFolder() || "";
-    if (connectionFolder.endsWith("/") || connectionFolder.endsWith("\\")) {
-      connectionFolder = connectionFolder.slice(0, -1);
-    }
-
     // MSAL client configuration.
     const msalConfig: Configuration = {
       auth: {

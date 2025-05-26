@@ -4,7 +4,7 @@ import { SolutionExplorer } from "./views/solutionExplorer";
 import { WebResourceExplorer } from "./views/webResourceExplorer";
 import { ConnectionStatusController } from "./connectionStatusController";
 import { registerCommands } from "./commandHandlers";
-import { checkClientId, checkConfigFolder, checkAPIVersion } from "./utils/configUtils";
+import { checkClientId, checkAPIVersion } from "./utils/configUtils";
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
@@ -28,7 +28,7 @@ const fileSyncState: Map<string, { guid: string, published: boolean, hash?: stri
  */
 function performInitialChecks(): string {
     // Check for mandatory configuration settings.
-    if (!checkClientId() || !checkAPIVersion() || !checkConfigFolder()) {
+    if (!checkClientId() || !checkAPIVersion()) {
         // Note: The individual check functions no longer show error messages.
         // Error messages related to critical settings will be handled by the caller if needed.
         return "CRITICAL_SETTINGS_MISSING";
@@ -217,7 +217,7 @@ async function showSettingsForm(
                 switch (message.command) {
                     case 'save':
                         const settingsToUpdate = [
-                            'appClientId', 'appTenantId', 'connectionInfoFolder',
+                            'appClientId', 'appTenantId',
                             'dynamicsAPIVersion', 'solutionNameFilter', 'solutionSortAscending'
                         ];
                         const config = vscode.workspace.getConfiguration('webRM');
@@ -270,7 +270,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             const webRMConfig = vscode.workspace.getConfiguration('webRM');
             const currentSettings: { [key: string]: any } = {};
             const settingKeys = [
-                'appClientId', 'appTenantId', 'connectionInfoFolder',
+                'appClientId', 'appTenantId',
                 'dynamicsAPIVersion', 'solutionNameFilter', 'solutionSortAscending'
             ];
             for (const key of settingKeys) {

@@ -16,7 +16,6 @@ This extension contributes the following settings:
 
 - `webRM.appClientId`: (REQUIRED) Client Id of your registered app in Azure
 - `webRM.appTenantId`: (REQUIRED FOR SINGLE TENANT APPS) Tenant Id of your registered app in Azure. Leave blank if Mult-Tenant
-- `webRM.connectionInfoFolder`: (REQUIRED) Folder to store encrypted connection info
 - `webRM.dynamicsAPIVersion`: (REQUIRED) API Version for Dynamics 365 Web API
 - `webRM.solutionNameFilter`: Used to filter solution list retrieved from Dynamics
 - `webRM.solutionSortAscending`: Used to change sort order of returned solution list

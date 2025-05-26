@@ -141,9 +141,6 @@ export class ConnectionExplorer implements vscode.TreeDataProvider<Connection> {
         this.connections = this.connections.filter(
             connection => connection.getConnectionId() !== connectionToRemoveId
         );
-        // Delete any cached/persisted data associated with the connection (e.g., token cache file).
-        await connectionToRemove.deleteConnection(); 
-        
         // Persist the updated list of connections.
         await this.updateConnectionsInGlobalState();
         this.refresh(); // Notify VS Code to refresh the tree view.
@@ -241,39 +238,6 @@ export class Connection extends vscode.TreeItem {
             throw new Error(`Authentication failed for connection "${this.connectionName}". Unable to retrieve a valid access token or expiration date.`);
         }
         return true;
-    }
-
-    /**
-     * Deletes any persisted cache files associated with this connection.
-     * This is typically called when a connection is removed from the explorer.
-     * @returns {Promise<void>} A promise that resolves when the deletion attempt is complete.
-     * @async
-     */
-    public async deleteConnection(): Promise<void> {
-        // Get the configured folder for storing connection cache files.
-        const connectionFolder: string = ConfigurationService.getConnectionInfoFolder() || ""; 
-        // Normalize folder path.
-        const normalizedConnectionFolder = connectionFolder.endsWith("/") || connectionFolder.endsWith("\\")
-            ? connectionFolder.slice(0, -1)
-            : connectionFolder;
-        
-        // Construct the expected file name for this connection's cache.
-        const fileName = `${normalizedConnectionFolder}/${this.connectionName}-${this.connectionId}.json`;
-
-        try {
-            // Check if the cache file exists before attempting to delete it.
-            if (fs.existsSync(fileName)) { 
-                await fs.promises.unlink(fileName); // Use asynchronous unlink.
-                console.log(`Successfully deleted connection cache file: ${fileName}`);
-            } else {
-                // File not found, could have been deleted manually or never created.
-                console.log(`Connection cache file not found (presumed already deleted or never existed): ${fileName}`);
-            }
-        } catch (error: unknown) { 
-            // Handle errors during file deletion (e.g., permissions issues).
-            const message = error instanceof Error ? error.message : String(error);
-            vscode.window.showErrorMessage(`Failed to delete connection cache file '${fileName}': ${message}`);
-        }
     }
 
     /**
