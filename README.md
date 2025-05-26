@@ -43,6 +43,14 @@ Added feature for adding and removing solutions as favorites by right clicking t
 
 Updated code for web resource retrieval.
 
+### 1.1.4
+
+- Major code cleanup: removed unused code and files
+- Updated authentication logic and dependencies
+- Added new configuration and utility modules
+- Improved solution and web resource explorer features
+- Enhanced connection management and settings UI
+
 ## How to Use
 
 ### Config App Registration
