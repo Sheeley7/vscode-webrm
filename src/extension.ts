@@ -26,12 +26,17 @@ const fileSyncState: Map<string, { guid: string, published: boolean, hash?: stri
  * @returns {string} Returns a string code indicating the outcome: 
  *                   "CRITICAL_SETTINGS_MISSING", "WORKSPACE_MISSING", or "ALL_CHECKS_PASSED".
  */
-function performInitialChecks(): string {
-    // Check for mandatory configuration settings.
-    if (!checkClientId() || !checkAPIVersion()) {
-        // Note: The individual check functions no longer show error messages.
-        // Error messages related to critical settings will be handled by the caller if needed.
-        return "CRITICAL_SETTINGS_MISSING";
+function performInitialChecks(): { status: string; missing: string[] } {
+    const missingSettings: string[] = [];
+    if (!checkClientId()) {
+        missingSettings.push('webRM.appClientId');
+    }
+    if (!checkAPIVersion()) {
+        missingSettings.push('webRM.dynamicsAPIVersion');
+    }
+
+    if (missingSettings.length > 0) {
+        return { status: "CRITICAL_SETTINGS_MISSING", missing: missingSettings };
     }
 
     // Check if a workspace or folder is open, as the extension operates on workspace files.
@@ -40,9 +45,9 @@ function performInitialChecks(): string {
         vscode.window.showErrorMessage(
             "You must be working inside a folder/workspace to use this extension."
         );
-        return "WORKSPACE_MISSING";
+        return { status: "WORKSPACE_MISSING", missing: [] };
     }
-    return "ALL_CHECKS_PASSED";
+    return { status: "ALL_CHECKS_PASSED", missing: [] };
 }
 
 /**
@@ -261,9 +266,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     try {
         let initialCheckResult = performInitialChecks();
 
-        if (initialCheckResult === "CRITICAL_SETTINGS_MISSING") {
+        if (initialCheckResult.status === "CRITICAL_SETTINGS_MISSING") {
+            const missingSettingsStr = initialCheckResult.missing.join(', ');
             vscode.window.showWarningMessage(
-                "Required Web Resource Manager settings are missing. Please configure them to proceed."
+                `Required Web Resource Manager settings are missing: ${missingSettingsStr}. Please configure them to proceed.`
             );
             
             // Prepare current settings to pass to the form
@@ -282,9 +288,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (formResult === 'SAVED') {
                 // Re-check settings after user saves them
                 initialCheckResult = performInitialChecks();
-                if (initialCheckResult !== "ALL_CHECKS_PASSED") {
-                    if (initialCheckResult === "CRITICAL_SETTINGS_MISSING") {
-                         vscode.window.showErrorMessage("Critical settings are still missing after configuration. Extension will not activate.");
+                if (initialCheckResult.status !== "ALL_CHECKS_PASSED") {
+                    if (initialCheckResult.status === "CRITICAL_SETTINGS_MISSING") {
+                        const stillMissing = initialCheckResult.missing.join(', ');
+                        vscode.window.showErrorMessage(`Critical settings are still missing after configuration: ${stillMissing}. Extension will not activate.`);
                     }
                     // WORKSPACE_MISSING message is handled by performInitialChecks
                     return; // Halt activation
@@ -294,11 +301,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 vscode.window.showInformationMessage("Settings configuration was cancelled. Extension will not activate.");
                 return; // Halt activation
             }
-        } else if (initialCheckResult === "WORKSPACE_MISSING") {
+        } else if (initialCheckResult.status === "WORKSPACE_MISSING") {
             // Error message already shown by performInitialChecks
             return; // Halt activation
         }
-        // If initialCheckResult is "ALL_CHECKS_PASSED", proceed with normal activation.
+        // If initialCheckResult.status is "ALL_CHECKS_PASSED", proceed with normal activation.
 
         // Setup UI elements like the status bar.
         initializeStatusBar();
