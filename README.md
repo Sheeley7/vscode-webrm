@@ -28,6 +28,9 @@ Currently, this extension only works for Dynamics 365 Online. It has only been t
 
 ## Release Notes
 
+### 1.1.6
+- Added better alerts for missing settings
+
 ### 1.1.5
 - Removed obsolete connection info folder setting and related logic
 

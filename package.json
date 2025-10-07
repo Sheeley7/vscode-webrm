@@ -2,7 +2,7 @@
   "name": "vscode-webrm",
   "displayName": "vscode-webrm",
   "description": "Web Resource Manager for Dataverse",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "publisher": "sheeley7",
   "icon": "resources/dark/vscode-webrm-logo.png",
   "repository": {
