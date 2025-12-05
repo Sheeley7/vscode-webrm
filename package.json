@@ -229,6 +229,12 @@
           "default": "true",
           "description": "Sort solution results in ascending order.",
           "scope": "resource"
+        },
+        "webRM.pullLatestVersionFromServer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Pull latest version from CRM server when opening a web resource file.",
+          "scope": "resource"
         }
       }
     }
