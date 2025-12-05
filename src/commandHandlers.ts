@@ -405,40 +405,50 @@ export function registerCommands(
                     return;
                 }
 
+                // Always fetch web resource content from CRM for comparison
+                const webResourceDetails = await CrmWebAPI.getWebResourceDetails(currentCrmConnection, webResource);
+                if (webResourceDetails.content === undefined) {
+                    vscode.window.showErrorMessage(`Failed to retrieve content for web resource: ${webResource.webResourceName}`);
+                    return;
+                }
+
+                const currentUser = currentCrmConnection.getConnectionUserName();
+
+                let localContentBase64 = '';
+                try {
+                    const localContent = await fs.promises.readFile(fullFilePath);
+                    localContentBase64 = localContent.toString('base64');
+                } catch (error: any) {
+                    if (error.code !== 'ENOENT') {
+                        // ENOENT is fine, means the file doesn't exist locally yet.
+                        // Other errors should be logged.
+                        console.error(`Error reading local file: ${error.message}`);
+                    }
+                }
+
+                const isContentDifferent = localContentBase64 !== webResourceDetails.content;
+
+                // Always show the warning if conditions are met
+                if (currentUser && webResourceDetails.modifiedby.fullname !== currentUser && isContentDifferent) {
+                    vscode.window.showWarningMessage(`The file on the server is different from your local version. It was last modified by ${webResourceDetails.modifiedby.fullname} on ${new Date(webResourceDetails.modifiedon).toLocaleString()}. Please verify that two developers aren't working on the same file.`, { modal: true });
+                }
+
                 const pullLatest = ConfigurationService.getPullLatestVersionFromServer();
-
                 if (pullLatest) {
-                    // Fetch web resource content from CRM
-                    const webResourceDetails = await CrmWebAPI.getWebResourceDetails(currentCrmConnection, webResource);
-                    if (webResourceDetails.content === undefined) {
-                        vscode.window.showErrorMessage(`Failed to retrieve content for web resource: ${webResource.webResourceName}`);
-                        return;
-                    }
-
-                    const currentUser = currentCrmConnection.getConnectionUserName();
-
-                    let localContentBase64 = '';
-                    try {
-                        const localContent = await fs.promises.readFile(fullFilePath);
-                        localContentBase64 = localContent.toString('base64');
-                    } catch (error: any) {
-                        if (error.code !== 'ENOENT') {
-                            console.error(`Error reading local file: ${error.message}`);
-                        }
-                    }
-
-                    const isContentDifferent = localContentBase64 !== webResourceDetails.content;
-
-                    if (currentUser && webResourceDetails.modifiedby.fullname !== currentUser && isContentDifferent) {
-                        vscode.window.showWarningMessage(`The file on the server was last modified by "${webResourceDetails.modifiedby.fullname}" on "${new Date(webResourceDetails.modifiedon).toLocaleString()}". Please verify that two developers aren't working on the same file.`, { modal: true });
-                    }
-
-                    // Write content to the local file
+                    // Only write content to the local file if the setting is enabled
                     await fs.promises.writeFile(
                         fullFilePath,
                         webResourceDetails.content,
                         { encoding: "base64" } // Assuming content is base64 encoded
                     );
+                } else {
+                    // If not pulling latest, check if the file exists locally
+                    try {
+                        await fs.promises.access(fullFilePath);
+                    } catch (error) {
+                        vscode.window.showErrorMessage(`Local file not found for '${webResource.webResourceName}'. Enable "Pull Latest Version from CRM Server" to download it.`, { modal: true });
+                        return; // Stop execution
+                    }
                 }
                 
                 // Open the local file in VS Code editor
