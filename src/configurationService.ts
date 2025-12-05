@@ -65,6 +65,16 @@ export class ConfigurationService {
     }
 
     /**
+     * Gets the 'pullLatestVersionFromServer' boolean flag from the extension settings.
+     * Determines if the latest version of a web resource should be pulled from the CRM server.
+     * Defaults to true if not set.
+     * @returns {boolean} True if the latest version should be pulled, false otherwise.
+     */
+    static getPullLatestVersionFromServer(): boolean {
+        return this.getConfiguration().get("pullLatestVersionFromServer", true);
+    }
+
+    /**
      * Gets the 'appTenantId' (Application Tenant ID) from the extension settings.
      * This ID specifies the Azure AD tenant to authenticate against.
      * @returns {string | undefined} The Application Tenant ID, or undefined if not set.
