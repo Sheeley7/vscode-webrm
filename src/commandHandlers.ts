@@ -404,20 +404,42 @@ export function registerCommands(
                     vscode.window.showErrorMessage("No active connection. Please connect first to open web resources.");
                     return;
                 }
-                
-                // Fetch web resource content from CRM
-                await CrmWebAPI.getWebResourceContent(currentCrmConnection, webResource);
-                if (webResource.webResourceContent === undefined) {
-                    vscode.window.showErrorMessage(`Failed to retrieve content for web resource: ${webResource.webResourceName}`);
-                    return;
-                }
 
-                // Write content to the local file
-                await fs.promises.writeFile(
-                    fullFilePath,
-                    webResource.webResourceContent,
-                    { encoding: "base64" } // Assuming content is base64 encoded
-                );
+                const pullLatest = ConfigurationService.getPullLatestVersionFromServer();
+
+                if (pullLatest) {
+                    // Fetch web resource content from CRM
+                    const webResourceDetails = await CrmWebAPI.getWebResourceDetails(currentCrmConnection, webResource);
+                    if (webResourceDetails.content === undefined) {
+                        vscode.window.showErrorMessage(`Failed to retrieve content for web resource: ${webResource.webResourceName}`);
+                        return;
+                    }
+
+                    const currentUser = currentCrmConnection.getConnectionUserName();
+
+                    let localContentBase64 = '';
+                    try {
+                        const localContent = await fs.promises.readFile(fullFilePath);
+                        localContentBase64 = localContent.toString('base64');
+                    } catch (error: any) {
+                        if (error.code !== 'ENOENT') {
+                            console.error(`Error reading local file: ${error.message}`);
+                        }
+                    }
+
+                    const isContentDifferent = localContentBase64 !== webResourceDetails.content;
+
+                    if (currentUser && webResourceDetails.modifiedby.fullname !== currentUser && isContentDifferent) {
+                        vscode.window.showWarningMessage(`The file on the server was last modified by "${webResourceDetails.modifiedby.fullname}" on "${new Date(webResourceDetails.modifiedon).toLocaleString()}". Please verify that two developers aren't working on the same file.`, { modal: true });
+                    }
+
+                    // Write content to the local file
+                    await fs.promises.writeFile(
+                        fullFilePath,
+                        webResourceDetails.content,
+                        { encoding: "base64" } // Assuming content is base64 encoded
+                    );
+                }
                 
                 // Open the local file in VS Code editor
                 const doc = await vscode.workspace.openTextDocument(fullFilePath);
@@ -437,7 +459,7 @@ export function registerCommands(
                         // Read file content as text (after writing base64 decoded content)
                         const fileContent = await fs.promises.readFile(fullFilePath, 'utf8');
                         const hash = ext.computeFileHash(fileContent);
-                        ext.setFileSyncState(fullFilePath, webResource.webResourceId, true, hash);
+                        ext.setFileSyncState(fullFilePath, webResource.webResourceId, pullLatest, hash);
                     }
                 } catch (e) {
                     // fallback: do nothing if import fails

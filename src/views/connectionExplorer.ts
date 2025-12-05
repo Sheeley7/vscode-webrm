@@ -279,4 +279,13 @@ export class Connection extends vscode.TreeItem {
     public getConnectionId(): string {
         return this.connectionId;
     }
+
+    /**
+     * Gets the user name from the authenticated account.
+     * @returns {string | undefined} The user name, or undefined if not authenticated.
+     */
+    public getConnectionUserName(): string | undefined {
+        const accountInfo = this.authProvider.getAccountInfo();
+        return accountInfo?.name;
+    }
 }

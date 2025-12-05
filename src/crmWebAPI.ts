@@ -34,7 +34,10 @@ interface RawWebResource {
 interface WebResourceContent {
     content: string; // Base64 encoded string of the web resource content.
     webresourceid?: string; // Often included in the response.
-    // Additional properties can be added.
+    modifiedon: string;
+    modifiedby: {
+        fullname: string;
+    };
 }
 
 /**
@@ -136,19 +139,19 @@ export class CrmWebAPI {
      * @returns {Promise<void>} A promise that resolves when the content has been fetched and set.
      * @throws {Error} If the API request fails, the web resource content is not found, or the response is in an unexpected format.
      */
-    static async getWebResourceContent(
+    static async getWebResourceDetails(
         connection: Connection,
         webResource: WebResource // Input WebResource object, its content property is updated.
-    ): Promise<void> {
+    ): Promise<WebResourceContent> {
         const apiVersion = ConfigurationService.getDynamicsAPIVersion();
         // Construct OData query to select only the 'content' field of the web resource.
-        const contentQuery = `${API_DATA_V}${apiVersion}/${ENTITY_WEBRESOURCE_SET}(${webResource.getWebResourceId()})${QUERY_SELECT}content`;
+        const contentQuery = `${API_DATA_V}${apiVersion}/${ENTITY_WEBRESOURCE_SET}(${webResource.getWebResourceId()})?$select=content,modifiedon&$expand=modifiedby($select=fullname)`;
         
         const webResourceRecord = await this.getRecord<WebResourceContent>(connection, contentQuery);
         
         // Validate the response and update the webResource object.
         if (webResourceRecord && typeof webResourceRecord.content === 'string') {
-            webResource.webResourceContent = webResourceRecord.content;
+            return webResourceRecord;
         } else {
             throw new Error(`Web resource content for '${webResource.webResourceName}' not found or in unexpected format.`);
         }
