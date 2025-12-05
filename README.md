@@ -19,6 +19,7 @@ This extension contributes the following settings:
 - `webRM.dynamicsAPIVersion`: (REQUIRED) API Version for Dynamics 365 Web API
 - `webRM.solutionNameFilter`: Used to filter solution list retrieved from Dynamics
 - `webRM.solutionSortAscending`: Used to change sort order of returned solution list
+- `webRM.pullLatestVersionFromServer`: Pull latest version from CRM server when opening a web resource file.
 
 ## Known Issues
 
