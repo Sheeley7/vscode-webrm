@@ -430,7 +430,7 @@ export function registerCommands(
 
                 // Always show the warning if conditions are met
                 if (currentUser && webResourceDetails.modifiedby.fullname !== currentUser && isContentDifferent) {
-                    vscode.window.showWarningMessage(`The file on the server was last modified by "${webResourceDetails.modifiedby.fullname}" on "${new Date(webResourceDetails.modifiedon).toLocaleString()}". Please verify that two developers aren't working on the same file.`, { modal: true });
+                    vscode.window.showWarningMessage(`The file on the server is different from your local version. It was last modified by ${webResourceDetails.modifiedby.fullname} on ${new Date(webResourceDetails.modifiedon).toLocaleString()}. Please verify that two developers aren't working on the same file.`, { modal: true });
                 }
 
                 const pullLatest = ConfigurationService.getPullLatestVersionFromServer();
