@@ -258,6 +258,6 @@
   "dependencies": {
     "@azure/msal-node": "^3.5.3",
     "node-fetch": "^2.7.0",
-    "uuid": "^11.1.0"
+    "uuid": "^14.0.0"
   }
 }
