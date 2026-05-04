@@ -427,8 +427,6 @@ export function registerCommands(
                     return;
                 }
 
-                const currentUser = currentCrmConnection.getConnectionUserName();
-
                 let localContentBase64 = '';
                 let localFileExists = false;
                 try {
@@ -445,9 +443,17 @@ export function registerCommands(
 
                 const isContentDifferent = localContentBase64 !== webResourceDetails.content;
 
-                // Always show the warning if conditions are met
-                if (localFileExists && currentUser && webResourceDetails.modifiedby.fullname !== currentUser && isContentDifferent) {
-                    vscode.window.showWarningMessage(`The file on the server is different from your local version. It was last modified by ${webResourceDetails.modifiedby.fullname} on ${new Date(webResourceDetails.modifiedon).toLocaleString()}. Please verify that two developers aren't working on the same file.`, { modal: true });
+                if (localFileExists && isContentDifferent) {
+                    const overwriteChoice = await vscode.window.showWarningMessage(
+                        `The server version of '${webResource.webResourceName}' is different from your local version. It was last modified by ${webResourceDetails.modifiedby.fullname} on ${new Date(webResourceDetails.modifiedon).toLocaleString()}. Downloading it will overwrite your local file.`,
+                        { modal: true },
+                        "Overwrite Local File"
+                    );
+
+                    if (overwriteChoice !== "Overwrite Local File") {
+                        vscode.window.showInformationMessage("Download cancelled by user.");
+                        return;
+                    }
                 }
 
                 await fs.promises.writeFile(
