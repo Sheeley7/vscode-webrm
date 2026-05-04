@@ -5,7 +5,7 @@ build({
   entryPoints: ['src/extension.ts'],
   bundle: true,
   platform: 'node',
-  target: ['node18'],
+  target: ['node20'],
   outfile: 'dist/extension.js',
   external: [
     'vscode', // Only VS Code API must be external

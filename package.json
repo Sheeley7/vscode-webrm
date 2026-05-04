@@ -10,7 +10,7 @@
     "url": "https://github.com/Sheeley7/vscode-webrm.git"
   },
   "engines": {
-    "vscode": "^1.89.0"
+    "vscode": "^1.98.0"
   },
   "categories": [
     "Extension Packs"
@@ -247,8 +247,7 @@
   "devDependencies": {
     "@types/node": "22.x",
     "@types/node-fetch": "^2.6.12",
-    "@types/uuid": "^10.0.0",
-    "@types/vscode": "^1.89.0",
+    "@types/vscode": "^1.98.0",
     "@typescript-eslint/eslint-plugin": "^8.32.1",
     "@typescript-eslint/parser": "^8.32.1",
     "esbuild": "^0.25.4",
@@ -256,8 +255,7 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
-    "@azure/msal-node": "^3.5.3",
-    "node-fetch": "^2.7.0",
-    "uuid": "^11.1.0"
+    "@azure/msal-node": "^5.1.5",
+    "node-fetch": "^2.7.0"
   }
 }

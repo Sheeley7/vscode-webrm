@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 // Keytar and Express imports were commented out as unused. If needed, they should be uncommented.
-import { v1 as uuidv1 } from "uuid";
+import { randomUUID } from "crypto";
 import { AuthProvider } from "../auth/authProvider";
 import { ConfigurationService } from "./../configurationService"; 
 import * as fs from "fs";
@@ -210,7 +210,7 @@ export class Connection extends vscode.TreeItem {
             typeof connectionObj.connectionId === "undefined" ||
             connectionObj.connectionId === ""
         ) {
-            this.connectionId = uuidv1().replace(/-/g, ""); // Generate a UUID and remove hyphens.
+            this.connectionId = randomUUID().replace(/-/g, ""); // Generate a UUID and remove hyphens.
         } else {
             this.connectionId = connectionObj.connectionId;
         }
