@@ -29,7 +29,20 @@
     "PowerAutomate",
     "XRM"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:wrm.addConnection",
+    "onCommand:wrm.connect",
+    "onCommand:wrm.removeConnection",
+    "onCommand:wrm.getWebResources",
+    "onCommand:wrm.publishWebResource",
+    "onCommand:wrm.openWebResource",
+    "onCommand:wrm.addFavoriteSolution",
+    "onCommand:wrm.removeFavoriteSolution",
+    "onCommand:wrm.filterSolutions",
+    "onCommand:wrm.toggleSolutionSortOrder",
+    "onCommand:wrm.copyConnectionUrl"
+  ],
   "main": "dist/extension.js",
   "contributes": {
     "commands": [
@@ -114,17 +127,20 @@
         {
           "id": "vscode-connection-explorer",
           "name": "Connection Manager",
-          "icon": "$(plug)"
+          "icon": "$(plug)",
+          "when": "wrm.viewsReady"
         },
         {
           "id": "vscode-solution-explorer",
           "name": "Solutions",
-          "icon": "$(package)"
+          "icon": "$(package)",
+          "when": "wrm.viewsReady"
         },
         {
           "id": "vscode-webresource-explorer",
           "name": "Web Resources",
-          "icon": "$(file-code)"
+          "icon": "$(file-code)",
+          "when": "wrm.viewsReady"
         }
       ]
     },

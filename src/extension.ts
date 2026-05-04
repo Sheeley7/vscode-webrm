@@ -286,6 +286,8 @@ async function showSettingsForm(
  */
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     try {
+        await vscode.commands.executeCommand("setContext", "wrm.viewsReady", false);
+
         let initialCheckResult = performInitialChecks();
 
         if (initialCheckResult.status === "CRITICAL_SETTINGS_MISSING") {
@@ -354,10 +356,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         registerFileStatusListeners(context);
 
         context.subscriptions.push(statusBar, fileStatusBar, solutionStatusBar, selectedSolutionListener);
+        await vscode.commands.executeCommand("setContext", "wrm.viewsReady", true);
 
         // No general "extension active" message as per previous user request
 
     } catch (error: unknown) {
+        await vscode.commands.executeCommand("setContext", "wrm.viewsReady", false);
         const message = error instanceof Error ? error.message : String(error);
         vscode.window.showErrorMessage(`Error activating Web Resource Manager extension: ${message}`);
         // Log the full error to the console for more detailed debugging.
