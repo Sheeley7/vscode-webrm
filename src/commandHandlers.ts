@@ -55,18 +55,40 @@ async function prepareWebResourceFilePath(webResourceName: string): Promise<stri
     return path.normalize(fullFilePath);
 }
 
-function getWebResourceNameFromFilePath(filePath: string): string | undefined {
-    const workspaceFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(filePath));
+function getWebResourceNameFromDocument(document: vscode.TextDocument): { filePath: string; webResourceName?: string } {
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    let rawFilePath = document.uri.fsPath || document.fileName;
+    if (workspaceFolders?.length === 1 && rawFilePath && !path.isAbsolute(rawFilePath)) {
+        rawFilePath = path.join(workspaceFolders[0].uri.fsPath, rawFilePath);
+    }
+    const filePath = path.normalize(rawFilePath);
+
+    if (!workspaceFolders || workspaceFolders.length === 0 || document.uri.scheme !== "file") {
+        return { filePath };
+    }
+
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri)
+        ?? workspaceFolders
+            .map(folder => ({
+                folder,
+                relativePath: path.relative(folder.uri.fsPath, filePath),
+            }))
+            .filter(candidate => candidate.relativePath && !candidate.relativePath.startsWith("..") && !path.isAbsolute(candidate.relativePath))
+            .sort((a, b) => a.relativePath.length - b.relativePath.length)[0]?.folder;
+
     if (!workspaceFolder) {
-        return undefined;
+        return { filePath };
     }
 
     const relativePath = path.relative(workspaceFolder.uri.fsPath, filePath);
     if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
-        return undefined;
+        return { filePath };
     }
 
-    return relativePath.split(path.sep).join("/");
+    return {
+        filePath,
+        webResourceName: relativePath.split(path.sep).join("/"),
+    };
 }
 
 /**
@@ -508,11 +530,13 @@ export function registerCommands(
                 const document = activeEditor.document;
                 const fileName = document.fileName; // Full local path of the active file
                 const baseName = path.basename(fileName); // File name part for messages
+                const { filePath: currentPath, webResourceName } = getWebResourceNameFromDocument(document);
+                const progressName = webResourceName ?? baseName;
 
                 // Prompt to save if dirty
                 if (document.isDirty) {
                     const saveChoice = await vscode.window.showWarningMessage(
-                        `'${baseName}' has unsaved changes. Save before publishing?`,
+                        `'${progressName}' has unsaved changes. Save before publishing?`,
                         { modal: true },
                         "Save and Publish"
                     );
@@ -527,7 +551,7 @@ export function registerCommands(
                 await vscode.window.withProgress(
                     {
                         location: vscode.ProgressLocation.Notification,
-                        title: `Publishing '${baseName}'...`,
+                        title: `Publishing '${progressName}' to Dynamics...`,
                         cancellable: true,
                     },
                     async (progress, token) => {
@@ -544,14 +568,12 @@ export function registerCommands(
                             return;
                         }
                         
-                        progress.report({ increment: 10, message: "Verifying connection..." });
+                        progress.report({ increment: 10 });
                         await connection.connect(); // Ensure connection is active and token is valid
 
                         if (token.isCancellationRequested) return;
-                        progress.report({ increment: 30, message: `Reading file ${baseName}...` });
+                        progress.report({ increment: 30 });
 
-                        const currentPath = path.normalize(fileName);
-                        const webResourceName = getWebResourceNameFromFilePath(currentPath);
                         if (!webResourceName) {
                             vscode.window.showErrorMessage(
                                 `'${baseName}' is not inside the current workspace. Open the file from this workspace before publishing.`
@@ -571,7 +593,7 @@ export function registerCommands(
                         if (token.isCancellationRequested) return;
                         const base64 = data.toString("base64"); // Convert file content to base64
 
-                        progress.report({ increment: 45, message: `Resolving '${webResourceName}' on the server...` });
+                        progress.report({ increment: 45 });
 
                         let webResourceId = connectionStatusController.getResourceIdFromPath(currentPath);
                         let addedToSelectedSolution = false;
@@ -591,7 +613,7 @@ export function registerCommands(
                                     return;
                                 }
 
-                                progress.report({ increment: 55, message: `Creating web resource and adding it to '${selectedSolution.getFriendlyName()}'...` });
+                                progress.report({ increment: 55 });
                                 const createdWebResource = await CrmWebAPI.createWebResource(
                                     connection,
                                     webResourceName,
@@ -615,7 +637,7 @@ export function registerCommands(
                         if (token.isCancellationRequested) return;
 
                         if (!addedToSelectedSolution) {
-                            progress.report({ increment: 55, message: `Checking solution '${selectedSolution.getFriendlyName()}'...` });
+                            progress.report({ increment: 55 });
                             const isInSelectedSolution = await CrmWebAPI.isWebResourceInSolution(
                                 connection,
                                 selectedSolution,
@@ -634,7 +656,7 @@ export function registerCommands(
                                     return;
                                 }
 
-                                progress.report({ increment: 65, message: `Adding to solution '${selectedSolution.getFriendlyName()}'...` });
+                                progress.report({ increment: 65 });
                                 await CrmWebAPI.addWebResourceToSolution(
                                     connection,
                                     selectedSolution,
@@ -645,13 +667,13 @@ export function registerCommands(
 
                         connectionStatusController.addSyncedWebResource(currentPath, webResourceId);
 
-                        progress.report({ increment: 80, message: `Publishing to CRM...` });
+                        progress.report({ increment: 80 });
                         await CrmWebAPI.publishWebResource(
                             connection,
                             webResourceId,
                             base64
                         );
-                        progress.report({ increment: 100, message: `Successfully published '${baseName}'.`});
+                        progress.report({ increment: 100 });
 
                         // Update the status bar to 'Published' and update hash
                         const fileContent = await fs.promises.readFile(fileName, 'utf8');
