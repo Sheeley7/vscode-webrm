@@ -430,9 +430,11 @@ export function registerCommands(
                 const currentUser = currentCrmConnection.getConnectionUserName();
 
                 let localContentBase64 = '';
+                let localFileExists = false;
                 try {
                     const localContent = await fs.promises.readFile(fullFilePath);
                     localContentBase64 = localContent.toString('base64');
+                    localFileExists = true;
                 } catch (error: any) {
                     if (error.code !== 'ENOENT') {
                         // ENOENT is fine, means the file doesn't exist locally yet.
@@ -444,27 +446,15 @@ export function registerCommands(
                 const isContentDifferent = localContentBase64 !== webResourceDetails.content;
 
                 // Always show the warning if conditions are met
-                if (currentUser && webResourceDetails.modifiedby.fullname !== currentUser && isContentDifferent) {
+                if (localFileExists && currentUser && webResourceDetails.modifiedby.fullname !== currentUser && isContentDifferent) {
                     vscode.window.showWarningMessage(`The file on the server is different from your local version. It was last modified by ${webResourceDetails.modifiedby.fullname} on ${new Date(webResourceDetails.modifiedon).toLocaleString()}. Please verify that two developers aren't working on the same file.`, { modal: true });
                 }
 
-                const pullLatest = ConfigurationService.getPullLatestVersionFromServer();
-                if (pullLatest) {
-                    // Only write content to the local file if the setting is enabled
-                    await fs.promises.writeFile(
-                        fullFilePath,
-                        webResourceDetails.content,
-                        { encoding: "base64" } // Assuming content is base64 encoded
-                    );
-                } else {
-                    // If not pulling latest, check if the file exists locally
-                    try {
-                        await fs.promises.access(fullFilePath);
-                    } catch (error) {
-                        vscode.window.showErrorMessage(`Local file not found for '${webResource.webResourceName}'. Enable "Pull Latest Version from CRM Server" to download it.`, { modal: true });
-                        return; // Stop execution
-                    }
-                }
+                await fs.promises.writeFile(
+                    fullFilePath,
+                    webResourceDetails.content,
+                    { encoding: "base64" } // Assuming content is base64 encoded
+                );
                 
                 // Open the local file in VS Code editor
                 const doc = await vscode.workspace.openTextDocument(fullFilePath);
@@ -484,7 +474,7 @@ export function registerCommands(
                         // Read file content as text (after writing base64 decoded content)
                         const fileContent = await fs.promises.readFile(fullFilePath, 'utf8');
                         const hash = ext.computeFileHash(fileContent);
-                        ext.setFileSyncState(fullFilePath, webResource.webResourceId, pullLatest, hash);
+                        ext.setFileSyncState(fullFilePath, webResource.webResourceId, true, hash);
                     }
                 } catch (e) {
                     // fallback: do nothing if import fails

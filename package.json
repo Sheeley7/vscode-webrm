@@ -2,7 +2,7 @@
   "name": "vscode-webrm",
   "displayName": "vscode-webrm",
   "description": "Web Resource Manager for Dataverse",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "publisher": "sheeley7",
   "icon": "resources/dark/vscode-webrm-logo.png",
   "repository": {
@@ -228,12 +228,6 @@
           "type": "boolean",
           "default": "true",
           "description": "Sort solution results in ascending order.",
-          "scope": "resource"
-        },
-        "webRM.pullLatestVersionFromServer": {
-          "type": "boolean",
-          "default": true,
-          "description": "Pull latest version from CRM server when opening a web resource file.",
           "scope": "resource"
         }
       }
