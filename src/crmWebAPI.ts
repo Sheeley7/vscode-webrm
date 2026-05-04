@@ -28,6 +28,12 @@ interface RawWebResource {
     // Additional properties can be added.
 }
 
+interface ServerWebResource {
+    webresourceid: string;
+    name: string;
+    webresourcetype?: number;
+}
+
 /**
  * Represents the structure of the response when fetching the content of a single web resource.
  */
@@ -91,6 +97,36 @@ const QUERY_ORDERBY = "&$orderby=";
  * This class encapsulates data retrieval and modification operations.
  */
 export class CrmWebAPI {
+    private static escapeODataString(value: string): string {
+        return value.replace(/'/g, "''");
+    }
+
+    private static getWebResourceTypeFromName(webResourceName: string): number {
+        const extension = path.extname(webResourceName).toLowerCase();
+        const typeByExtension: Record<string, number> = {
+            ".html": 1,
+            ".htm": 1,
+            ".css": 2,
+            ".js": 3,
+            ".xml": 4,
+            ".png": 5,
+            ".jpg": 6,
+            ".jpeg": 6,
+            ".gif": 7,
+            ".xap": 8,
+            ".xsl": 9,
+            ".xslt": 9,
+            ".ico": 10,
+            ".svg": 11,
+            ".resx": 12,
+        };
+        const webResourceType = typeByExtension[extension];
+        if (!webResourceType) {
+            throw new Error(`Unsupported web resource file type '${extension || "(none)"}' for '${webResourceName}'.`);
+        }
+        return webResourceType;
+    }
+
     /**
      * Retrieves a list of solutions from the connected Dynamics 365 environment.
      * Filters solutions based on configuration settings (name filter, visibility, managed status).
@@ -218,6 +254,91 @@ export class CrmWebAPI {
             // Handle non-Error objects thrown, though this is rare in well-behaved async code.
             throw new Error(`An unknown error occurred while processing web resources: ${String(err)}`);
         }
+    }
+
+    /**
+     * Finds a web resource by its logical name anywhere on the server.
+     */
+    static async getWebResourceByName(connection: Connection, webResourceName: string): Promise<ServerWebResource | null> {
+        const apiVersion = ConfigurationService.getDynamicsAPIVersion();
+        const escapedName = this.escapeODataString(webResourceName);
+        const query =
+            `${API_DATA_V}${apiVersion}/${ENTITY_WEBRESOURCE_SET}` +
+            `${QUERY_SELECT}webresourceid,name,webresourcetype` +
+            `${QUERY_FILTER}name eq '${escapedName}'&$top=1`;
+
+        const results = await this.getRecords<ServerWebResource>(connection, query);
+        return results[0] ?? null;
+    }
+
+    /**
+     * Checks whether a web resource is already part of a solution.
+     */
+    static async isWebResourceInSolution(
+        connection: Connection,
+        solution: Solution,
+        webResourceId: string
+    ): Promise<boolean> {
+        const apiVersion = ConfigurationService.getDynamicsAPIVersion();
+        const query =
+            `${API_DATA_V}${apiVersion}/${ENTITY_MSDYN_SOLUTION_COMPONENT_SUMMARIES}` +
+            `${QUERY_SELECT}msdyn_objectid` +
+            `${QUERY_FILTER}(msdyn_solutionid eq ${solution.solutionId}) and ` +
+            `(msdyn_componenttype eq 61) and (msdyn_objectid eq ${webResourceId})&$top=1`;
+
+        const results = await this.getRecords<RawWebResource>(connection, query);
+        return results.length > 0;
+    }
+
+    /**
+     * Creates a new web resource record using the provided base64 content.
+     */
+    static async createWebResource(
+        connection: Connection,
+        webResourceName: string,
+        base64Content: string
+    ): Promise<ServerWebResource> {
+        const fileName = path.basename(webResourceName);
+        const webResourceType = this.getWebResourceTypeFromName(webResourceName);
+        await this.createRecord(
+            connection,
+            {
+                name: webResourceName,
+                displayname: fileName,
+                webresourcetype: webResourceType,
+                content: base64Content,
+            },
+            ENTITY_WEBRESOURCE_SET
+        );
+
+        const createdWebResource = await this.getWebResourceByName(connection, webResourceName);
+        if (!createdWebResource) {
+            throw new Error(`Created web resource '${webResourceName}', but could not retrieve it from the server.`);
+        }
+        return createdWebResource;
+    }
+
+    /**
+     * Adds an existing web resource to a solution.
+     */
+    static async addWebResourceToSolution(
+        connection: Connection,
+        solution: Solution,
+        webResourceId: string
+    ): Promise<void> {
+        const apiVersion = ConfigurationService.getDynamicsAPIVersion();
+        const addSolutionComponentQuery = `${API_DATA_V}${apiVersion}/AddSolutionComponent`;
+        await this.makeApiRequest<unknown, Record<string, string | number | boolean>>(
+            connection,
+            "POST",
+            addSolutionComponentQuery,
+            {
+                ComponentId: webResourceId,
+                ComponentType: 61,
+                SolutionUniqueName: solution.solutionUniqueName,
+                AddRequiredComponents: false,
+            }
+        );
     }
 
     /**
@@ -410,6 +531,19 @@ export class CrmWebAPI {
         // PATCH requests typically return 204 No Content, so TResponsePayload is void.
         await this.makeApiRequest<void, UpdateRequest>(connection, "PATCH", updateQuery, record);
         // Success is implied if no error is thrown.
+    }
+
+    /**
+     * Creates a record in Dynamics 365 using a POST request.
+     */
+    private static async createRecord(
+        connection: Connection,
+        record: UpdateRequest,
+        entityName: string
+    ): Promise<void> {
+        const apiVersion = ConfigurationService.getDynamicsAPIVersion();
+        const createQuery = `${API_DATA_V}${apiVersion}/${entityName}`;
+        await this.makeApiRequest<void, UpdateRequest>(connection, "POST", createQuery, record);
     }
 
     /**

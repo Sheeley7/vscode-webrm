@@ -16,8 +16,11 @@ interface RawSolution {
  */
 export class SolutionExplorer implements vscode.TreeDataProvider<Solution> {
     private solutions: Solution[] = [];
+    private selectedSolution?: Solution;
     private _onDidChangeTreeData: vscode.EventEmitter<Solution | undefined | null | void> = new vscode.EventEmitter<Solution | undefined | null | void>();
+    private _onDidChangeSelectedSolution: vscode.EventEmitter<Solution | undefined> = new vscode.EventEmitter<Solution | undefined>();
     readonly onDidChangeTreeData: vscode.Event<Solution | undefined | null | void> = this._onDidChangeTreeData.event;
+    readonly onDidChangeSelectedSolution: vscode.Event<Solution | undefined> = this._onDidChangeSelectedSolution.event;
 
     /**
      * Creates an instance of SolutionExplorer.
@@ -82,6 +85,7 @@ export class SolutionExplorer implements vscode.TreeDataProvider<Solution> {
                 this // Pass reference to SolutionExplorer for callbacks
             )
         );
+        this.clearSelectedSolutionIfMissing();
         this.refresh();
     }
     
@@ -92,7 +96,26 @@ export class SolutionExplorer implements vscode.TreeDataProvider<Solution> {
      */
     public setSolutions(solutions: Solution[]): void {
         this.solutions = solutions;
+        this.clearSelectedSolutionIfMissing();
         this.refresh();
+    }
+
+    /**
+     * Tracks the solution currently selected in the Solutions tree.
+     */
+    public setSelectedSolution(solution: Solution | undefined): void {
+        if (this.selectedSolution?.solutionId === solution?.solutionId) {
+            return;
+        }
+        this.selectedSolution = solution;
+        this._onDidChangeSelectedSolution.fire(solution);
+    }
+
+    /**
+     * Returns the solution currently selected in the Solutions tree, if any.
+     */
+    public getSelectedSolution(): Solution | undefined {
+        return this.selectedSolution;
     }
 
 
@@ -132,6 +155,7 @@ export class SolutionExplorer implements vscode.TreeDataProvider<Solution> {
      */
     clearSolutions(): void {
         this.solutions = [];
+        this.setSelectedSolution(undefined);
         this.refresh();
     }
 
@@ -140,6 +164,16 @@ export class SolutionExplorer implements vscode.TreeDataProvider<Solution> {
      */
     refresh(): void {
         this._onDidChangeTreeData.fire();
+    }
+
+    private clearSelectedSolutionIfMissing(): void {
+        if (!this.selectedSolution) {
+            return;
+        }
+        const selectedStillExists = this.solutions.some(solution => solution.solutionId === this.selectedSolution?.solutionId);
+        if (!selectedStillExists) {
+            this.setSelectedSolution(undefined);
+        }
     }
 }
 

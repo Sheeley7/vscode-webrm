@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { ConnectionExplorer, Connection } from "./views/connectionExplorer";
-import { SolutionExplorer } from "./views/solutionExplorer";
+import { SolutionExplorer, Solution } from "./views/solutionExplorer";
 import { WebResourceExplorer } from "./views/webResourceExplorer";
 import { ConnectionStatusController } from "./connectionStatusController";
 import { registerCommands } from "./commandHandlers";
@@ -16,6 +16,7 @@ import * as crypto from 'crypto';
  */
 let statusBar: vscode.StatusBarItem; 
 let fileStatusBar: vscode.StatusBarItem;
+let solutionStatusBar: vscode.StatusBarItem;
 // Map to track file sync and publish state: { [filePath: string]: { guid: string, published: boolean, hash?: string } }
 const fileSyncState: Map<string, { guid: string, published: boolean, hash?: string }> = new Map();
 
@@ -72,6 +73,24 @@ function initializeFileStatusBar(): void {
     fileStatusBar.text = "File: Not Synced";
     fileStatusBar.tooltip = "Shows Dynamics sync and publish status for the current file.";
     fileStatusBar.show();
+}
+
+function initializeSolutionStatusBar(): void {
+    solutionStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 98);
+    solutionStatusBar.text = "Solution: None";
+    solutionStatusBar.tooltip = "Selected Dynamics solution for publishing web resources.";
+    solutionStatusBar.show();
+}
+
+function updateSolutionStatusBar(solution?: Solution): void {
+    if (solution) {
+        solutionStatusBar.text = `Solution: ${solution.getFriendlyName()}`;
+        solutionStatusBar.tooltip = `Selected Dynamics solution: ${solution.getFriendlyName()} (${solution.solutionUniqueName})`;
+    } else {
+        solutionStatusBar.text = "Solution: None";
+        solutionStatusBar.tooltip = "Select a Dynamics solution before publishing files that are not already linked.";
+    }
+    solutionStatusBar.show();
 }
 
 function updateFileStatusBar(editor?: vscode.TextEditor) {
@@ -168,10 +187,13 @@ function registerTreeDataProviders(
         connectionExplorer
     );
     // Register the SolutionExplorer for the 'vscode-solution-explorer' view.
-    const solutionTreeView = vscode.window.registerTreeDataProvider(
+    const solutionTreeView = vscode.window.createTreeView(
         "vscode-solution-explorer", // Matches the view ID in package.json
-        solutionExplorer
+        { treeDataProvider: solutionExplorer }
     );
+    const solutionSelectionListener = solutionTreeView.onDidChangeSelection(event => {
+        solutionExplorer.setSelectedSolution(event.selection[0]);
+    });
     // Register the WebResourceExplorer for the 'vscode-webresource-explorer' view.
     const webResourceTreeView = vscode.window.registerTreeDataProvider(
         "vscode-webresource-explorer", // Matches the view ID in package.json
@@ -180,7 +202,7 @@ function registerTreeDataProviders(
 
     // Add the tree view registrations to the extension's subscriptions
     // to ensure they are disposed of when the extension is deactivated.
-    context.subscriptions.push(connectionTreeView, solutionTreeView, webResourceTreeView);
+    context.subscriptions.push(connectionTreeView, solutionTreeView, solutionSelectionListener, webResourceTreeView);
 }
 
 /**
@@ -310,12 +332,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         // Setup UI elements like the status bar.
         initializeStatusBar();
         initializeFileStatusBar();
+        initializeSolutionStatusBar();
 
         // Initialize core components:
         const connectionExplorer = new ConnectionExplorer(context);
         const solutionExplorer = new SolutionExplorer(context, []);
         const webResourceExplorer = new WebResourceExplorer([]);
         const connectionStatusController = new ConnectionStatusController(statusBar);
+        const selectedSolutionListener = solutionExplorer.onDidChangeSelectedSolution(updateSolutionStatusBar);
         
         registerTreeDataProviders(context, connectionExplorer, solutionExplorer, webResourceExplorer);
 
@@ -329,7 +353,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         
         registerFileStatusListeners(context);
 
-        context.subscriptions.push(statusBar, fileStatusBar);
+        context.subscriptions.push(statusBar, fileStatusBar, solutionStatusBar, selectedSolutionListener);
 
         // No general "extension active" message as per previous user request
 
@@ -354,6 +378,9 @@ export async function deactivate(): Promise<void> {
     }
     if (fileStatusBar) {
         fileStatusBar.dispose();
+    }
+    if (solutionStatusBar) {
+        solutionStatusBar.dispose();
     }
     // Remove all persistent MSAL token caches for all connections
     try {

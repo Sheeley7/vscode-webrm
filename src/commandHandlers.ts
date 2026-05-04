@@ -55,6 +55,20 @@ async function prepareWebResourceFilePath(webResourceName: string): Promise<stri
     return path.normalize(fullFilePath);
 }
 
+function getWebResourceNameFromFilePath(filePath: string): string | undefined {
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(filePath));
+    if (!workspaceFolder) {
+        return undefined;
+    }
+
+    const relativePath = path.relative(workspaceFolder.uri.fsPath, filePath);
+    if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+        return undefined;
+    }
+
+    return relativePath.split(path.sep).join("/");
+}
+
 /**
  * Registers all commands for the extension.
  * Each command is wrapped in a try-catch block for robust error handling.
@@ -291,6 +305,7 @@ export function registerCommands(
                 vscode.window.showErrorMessage("No solution selected or invalid solution. Please select a solution from the explorer.");
                 return;
             }
+            solutionExplorer.setSelectedSolution(solution);
             try {
                 await vscode.window.withProgress(
                     {
@@ -503,7 +518,7 @@ export function registerCommands(
                     const saveChoice = await vscode.window.showWarningMessage(
                         `'${baseName}' has unsaved changes. Save before publishing?`,
                         { modal: true },
-                        "Save and Publish", "Cancel"
+                        "Save and Publish"
                     );
                     if (saveChoice === "Save and Publish") {
                         await document.save();
@@ -540,21 +555,101 @@ export function registerCommands(
                         progress.report({ increment: 30, message: `Reading file ${baseName}...` });
 
                         const currentPath = path.normalize(fileName);
-                        // Retrieve the CRM web resource ID linked to this local file path
-                        const webResourceId = connectionStatusController.getResourceIdFromPath(currentPath);
-
-                        if (typeof webResourceId === "undefined") {
+                        const webResourceName = getWebResourceNameFromFilePath(currentPath);
+                        if (!webResourceName) {
                             vscode.window.showErrorMessage(
-                                `'${baseName}' is not linked to a Dynamics record. Please 'Open' the web resource from the explorer first to establish the link.`
+                                `'${baseName}' is not inside the current workspace. Open the file from this workspace before publishing.`
                             );
                             return;
                         }
-                        
+
+                        const selectedSolution = solutionExplorer.getSelectedSolution();
+                        if (!selectedSolution) {
+                            vscode.window.showErrorMessage(
+                                "Select a solution before publishing so the extension knows which solution to check or add the file to."
+                            );
+                            return;
+                        }
+
                         const data = await fs.promises.readFile(currentPath);
                         if (token.isCancellationRequested) return;
-
-                        progress.report({ increment: 60, message: `Publishing to CRM...` });
                         const base64 = data.toString("base64"); // Convert file content to base64
+
+                        progress.report({ increment: 45, message: `Resolving '${webResourceName}' on the server...` });
+
+                        let webResourceId = connectionStatusController.getResourceIdFromPath(currentPath);
+                        let addedToSelectedSolution = false;
+                        if (typeof webResourceId === "undefined") {
+                            const serverWebResource = await CrmWebAPI.getWebResourceByName(connection, webResourceName);
+                            webResourceId = serverWebResource?.webresourceid;
+
+                            if (!webResourceId) {
+                                const createChoice = await vscode.window.showWarningMessage(
+                                    `Web resource '${webResourceName}' does not exist on the server and is not currently in solution '${selectedSolution.getFriendlyName()}'. Create it, add it to solution '${selectedSolution.getFriendlyName()}', and publish?`,
+                                    { modal: true },
+                                    "Create, Add, and Publish"
+                                );
+
+                                if (createChoice !== "Create, Add, and Publish") {
+                                    vscode.window.showInformationMessage("Publish cancelled by user.");
+                                    return;
+                                }
+
+                                progress.report({ increment: 55, message: `Creating web resource and adding it to '${selectedSolution.getFriendlyName()}'...` });
+                                const createdWebResource = await CrmWebAPI.createWebResource(
+                                    connection,
+                                    webResourceName,
+                                    base64
+                                );
+                                webResourceId = createdWebResource.webresourceid;
+                                await CrmWebAPI.addWebResourceToSolution(
+                                    connection,
+                                    selectedSolution,
+                                    webResourceId
+                                );
+                                addedToSelectedSolution = true;
+                            }
+                        }
+
+                        if (!webResourceId) {
+                            vscode.window.showErrorMessage(`Could not resolve Dynamics web resource '${webResourceName}'.`);
+                            return;
+                        }
+
+                        if (token.isCancellationRequested) return;
+
+                        if (!addedToSelectedSolution) {
+                            progress.report({ increment: 55, message: `Checking solution '${selectedSolution.getFriendlyName()}'...` });
+                            const isInSelectedSolution = await CrmWebAPI.isWebResourceInSolution(
+                                connection,
+                                selectedSolution,
+                                webResourceId
+                            );
+
+                            if (!isInSelectedSolution) {
+                                const addChoice = await vscode.window.showWarningMessage(
+                                    `Web resource '${webResourceName}' exists on the server but is not currently in solution '${selectedSolution.getFriendlyName()}'. Add it to solution '${selectedSolution.getFriendlyName()}' and publish?`,
+                                    { modal: true },
+                                    "Add to Solution and Publish"
+                                );
+
+                                if (addChoice !== "Add to Solution and Publish") {
+                                    vscode.window.showInformationMessage("Publish cancelled by user.");
+                                    return;
+                                }
+
+                                progress.report({ increment: 65, message: `Adding to solution '${selectedSolution.getFriendlyName()}'...` });
+                                await CrmWebAPI.addWebResourceToSolution(
+                                    connection,
+                                    selectedSolution,
+                                    webResourceId
+                                );
+                            }
+                        }
+
+                        connectionStatusController.addSyncedWebResource(currentPath, webResourceId);
+
+                        progress.report({ increment: 80, message: `Publishing to CRM...` });
                         await CrmWebAPI.publishWebResource(
                             connection,
                             webResourceId,
