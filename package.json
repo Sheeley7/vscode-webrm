@@ -53,9 +53,9 @@
       },
       {
         "command": "wrm.getWebResources",
-        "title": "Get Web Resources",
+        "title": "Link Solution",
         "category": "Web Resource Manager",
-        "icon": "$(cloud-download)"
+        "icon": "$(link)"
       },
       {
         "command": "wrm.publishWebResource",
@@ -65,9 +65,9 @@
       },
       {
         "command": "wrm.openWebResource",
-        "title": "Open",
+        "title": "Pull from Server",
         "category": "Web Resource Manager",
-        "icon": "$(go-to-file)"
+        "icon": "$(cloud-download)"
       },
       {
         "command": "wrm.addFavoriteSolution",
@@ -175,7 +175,7 @@
           "command": "wrm.getWebResources",
           "when": "view == vscode-solution-explorer && viewItem == solution",
           "group": "inline",
-          "icon": "$(cloud-download)"
+          "icon": "$(cursor)"
         },
         {
           "command": "wrm.addFavoriteSolution",
@@ -191,7 +191,7 @@
           "command": "wrm.openWebResource",
           "when": "view == vscode-webresource-explorer && viewItem == webresource",
           "group": "inline",
-          "icon": "$(go-to-file)"
+          "icon": "$(cloud-download)"
         }
       ],
       "editor/context": []
