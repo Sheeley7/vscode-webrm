@@ -20,6 +20,18 @@ let solutionStatusBar: vscode.StatusBarItem;
 // Map to track file sync and publish state: { [filePath: string]: { guid: string, published: boolean, hash?: string } }
 const fileSyncState: Map<string, { guid: string, published: boolean, hash?: string }> = new Map();
 
+class LoadingTreeDataProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
+    private readonly loadingItem = new vscode.TreeItem("Loading Web Resource Manager...", vscode.TreeItemCollapsibleState.None);
+
+    getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
+        return element;
+    }
+
+    getChildren(): vscode.ProviderResult<vscode.TreeItem[]> {
+        return [this.loadingItem];
+    }
+}
+
 /**
  * Performs initial configuration and workspace checks essential for the extension's operation.
  * This includes verifying required settings (Client ID, API Version, Config Folder) and ensuring a workspace is open.
@@ -181,6 +193,10 @@ function registerTreeDataProviders(
     solutionExplorer: SolutionExplorer,
     webResourceExplorer: WebResourceExplorer
 ): void {
+    const loadingTreeView = vscode.window.registerTreeDataProvider(
+        "vscode-webrm-loading",
+        new LoadingTreeDataProvider()
+    );
     // Register the ConnectionExplorer for the 'vscode-connection-explorer' view.
     const connectionTreeView = vscode.window.registerTreeDataProvider(
         "vscode-connection-explorer", // Matches the view ID in package.json
@@ -202,7 +218,7 @@ function registerTreeDataProviders(
 
     // Add the tree view registrations to the extension's subscriptions
     // to ensure they are disposed of when the extension is deactivated.
-    context.subscriptions.push(connectionTreeView, solutionTreeView, solutionSelectionListener, webResourceTreeView);
+    context.subscriptions.push(loadingTreeView, connectionTreeView, solutionTreeView, solutionSelectionListener, webResourceTreeView);
 }
 
 /**
@@ -288,6 +304,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     try {
         await vscode.commands.executeCommand("setContext", "wrm.viewsReady", false);
 
+        // Register providers first so the activity bar icon and tree views appear as soon as the extension is ready.
+        initializeStatusBar();
+        initializeFileStatusBar();
+        initializeSolutionStatusBar();
+
+        const connectionExplorer = new ConnectionExplorer(context);
+        const solutionExplorer = new SolutionExplorer(context, []);
+        const webResourceExplorer = new WebResourceExplorer([]);
+        const connectionStatusController = new ConnectionStatusController(statusBar);
+        const selectedSolutionListener = solutionExplorer.onDidChangeSelectedSolution(updateSolutionStatusBar);
+
+        registerTreeDataProviders(context, connectionExplorer, solutionExplorer, webResourceExplorer);
+
+        registerCommands(
+            context,
+            connectionExplorer,
+            solutionExplorer,
+            webResourceExplorer,
+            connectionStatusController
+        );
+
+        registerFileStatusListeners(context);
+
+        context.subscriptions.push(statusBar, fileStatusBar, solutionStatusBar, selectedSolutionListener);
+        await vscode.commands.executeCommand("setContext", "wrm.viewsReady", true);
+
         let initialCheckResult = performInitialChecks();
 
         if (initialCheckResult.status === "CRITICAL_SETTINGS_MISSING") {
@@ -315,48 +357,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 if (initialCheckResult.status !== "ALL_CHECKS_PASSED") {
                     if (initialCheckResult.status === "CRITICAL_SETTINGS_MISSING") {
                         const stillMissing = initialCheckResult.missing.join(', ');
-                        vscode.window.showErrorMessage(`Critical settings are still missing after configuration: ${stillMissing}. Extension will not activate.`);
+                        vscode.window.showErrorMessage(`Critical settings are still missing after configuration: ${stillMissing}. Configure them before connecting.`);
                     }
                     // WORKSPACE_MISSING message is handled by performInitialChecks
-                    return; // Halt activation
+                    return;
                 }
                 // If checks now pass, fall through to normal activation
             } else { // CANCELLED
-                vscode.window.showInformationMessage("Settings configuration was cancelled. Extension will not activate.");
-                return; // Halt activation
+                vscode.window.showInformationMessage("Settings configuration was cancelled. Configure settings before connecting.");
+                return;
             }
         } else if (initialCheckResult.status === "WORKSPACE_MISSING") {
             // Error message already shown by performInitialChecks
-            return; // Halt activation
+            return;
         }
-        // If initialCheckResult.status is "ALL_CHECKS_PASSED", proceed with normal activation.
-
-        // Setup UI elements like the status bar.
-        initializeStatusBar();
-        initializeFileStatusBar();
-        initializeSolutionStatusBar();
-
-        // Initialize core components:
-        const connectionExplorer = new ConnectionExplorer(context);
-        const solutionExplorer = new SolutionExplorer(context, []);
-        const webResourceExplorer = new WebResourceExplorer([]);
-        const connectionStatusController = new ConnectionStatusController(statusBar);
-        const selectedSolutionListener = solutionExplorer.onDidChangeSelectedSolution(updateSolutionStatusBar);
-        
-        registerTreeDataProviders(context, connectionExplorer, solutionExplorer, webResourceExplorer);
-
-        registerCommands(
-            context,
-            connectionExplorer,
-            solutionExplorer,
-            webResourceExplorer,
-            connectionStatusController
-        );
-        
-        registerFileStatusListeners(context);
-
-        context.subscriptions.push(statusBar, fileStatusBar, solutionStatusBar, selectedSolutionListener);
-        await vscode.commands.executeCommand("setContext", "wrm.viewsReady", true);
 
         // No general "extension active" message as per previous user request
 

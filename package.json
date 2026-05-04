@@ -30,7 +30,7 @@
     "XRM"
   ],
   "activationEvents": [
-    "onStartupFinished",
+    "onView:vscode-webrm-loading",
     "onCommand:wrm.addConnection",
     "onCommand:wrm.connect",
     "onCommand:wrm.removeConnection",
@@ -124,6 +124,12 @@
     },
     "views": {
       "vscode-webresourcemanager": [
+        {
+          "id": "vscode-webrm-loading",
+          "name": "Loading",
+          "icon": "$(loading)",
+          "when": "!wrm.viewsReady"
+        },
         {
           "id": "vscode-connection-explorer",
           "name": "Connection Manager",
