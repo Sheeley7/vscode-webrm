@@ -112,6 +112,22 @@ async function readFileBase64IfExists(filePath: string): Promise<string | undefi
     }
 }
 
+function resolveSolutionArgument(solutionArg: unknown, solutionExplorer: SolutionExplorer): Solution | undefined {
+    if (
+        solutionArg instanceof Solution ||
+        (
+            typeof solutionArg === "object" &&
+            solutionArg !== null &&
+            "solutionId" in solutionArg &&
+            typeof (solutionArg as { solutionId?: unknown }).solutionId === "string"
+        )
+    ) {
+        return solutionArg as Solution;
+    }
+
+    return solutionExplorer.getSelectedSolution();
+}
+
 /**
  * Registers all commands for the extension.
  * Each command is wrapped in a try-catch block for robust error handling.
@@ -440,8 +456,8 @@ export function registerCommands(
 
     const wrmPushSolutionLocalFiles = vscode.commands.registerCommand(
         "wrm.pushSolutionLocalFiles",
-        async (solution?: Solution) => {
-            solution = solution ?? solutionExplorer.getSelectedSolution();
+        async (solutionArg?: unknown) => {
+            const solution = resolveSolutionArgument(solutionArg, solutionExplorer);
             if (!solution || !solution.solutionId) {
                 vscode.window.showErrorMessage("Link a solution before pushing local files.");
                 return;
@@ -587,8 +603,8 @@ export function registerCommands(
 
     const wrmPullSolutionServerFiles = vscode.commands.registerCommand(
         "wrm.pullSolutionServerFiles",
-        async (solution?: Solution) => {
-            solution = solution ?? solutionExplorer.getSelectedSolution();
+        async (solutionArg?: unknown) => {
+            const solution = resolveSolutionArgument(solutionArg, solutionExplorer);
             if (!solution || !solution.solutionId) {
                 vscode.window.showErrorMessage("Link a solution before replacing local files.");
                 return;
