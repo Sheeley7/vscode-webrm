@@ -65,6 +65,11 @@ interface UpdateRequest {
     [key: string]: string | number | boolean | undefined; // Allows other string-keyed properties.
 }
 
+interface WebResourceContentUpdate {
+    webResourceId: string;
+    base64Content: string;
+}
+
 /**
  * Defines the structure for parameters passed to the PublishXml Dynamics 365 action.
  */
@@ -97,6 +102,10 @@ const QUERY_ORDERBY = "&$orderby=";
  * This class encapsulates data retrieval and modification operations.
  */
 export class CrmWebAPI {
+    private static createBoundary(prefix: string): string {
+        return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    }
+
     private static escapeODataString(value: string): string {
         return value.replace(/'/g, "''");
     }
@@ -369,13 +378,84 @@ export class CrmWebAPI {
             // Step 2: Publish the web resource using PublishXml action.
             await this.publishXML(
                 connection,
-                webResourceId
+                [webResourceId]
             );
         } catch (err: unknown) { // Catching unknown for type safety.
             // Add more context to the error if it's an Error object.
             const message = err instanceof Error ? err.message : String(err);
             throw new Error(`Error publishing web resource (ID: ${webResourceId}): ${message}`);
         }
+    }
+
+    /**
+     * Updates multiple web resource records in a single non-transactional OData batch request.
+     */
+    static async updateWebResourcesBatch(
+        connection: Connection,
+        updates: WebResourceContentUpdate[]
+    ): Promise<void> {
+        if (updates.length === 0) {
+            return;
+        }
+
+        const apiVersion = ConfigurationService.getDynamicsAPIVersion();
+        const batchBoundary = this.createBoundary("batch");
+        const crlf = "\r\n";
+        const requestParts: string[] = [];
+
+        for (const update of updates) {
+            requestParts.push(
+                `--${batchBoundary}`,
+                "Content-Type: application/http",
+                "Content-Transfer-Encoding: binary",
+                "",
+                `PATCH ${API_DATA_V}${apiVersion}/${ENTITY_WEBRESOURCE_SET}(${update.webResourceId}) HTTP/1.1`,
+                "Content-Type: application/json; type=entry",
+                "",
+                JSON.stringify({ content: update.base64Content })
+            );
+        }
+
+        const batchBody = [
+            ...requestParts,
+            `--${batchBoundary}--`,
+            "",
+        ].join(crlf);
+
+        await this.makeRawApiRequest(
+            connection,
+            "POST",
+            `${API_DATA_V}${apiVersion}/$batch`,
+            batchBody,
+            `multipart/mixed; boundary="${batchBoundary}"`,
+            responseText => {
+                const innerStatusMatches = [...responseText.matchAll(/HTTP\/1\.1\s+(\d{3})/g)];
+                if (innerStatusMatches.length !== updates.length) {
+                    throw new Error(`Batch update returned ${innerStatusMatches.length} responses for ${updates.length} updates: ${responseText}`);
+                }
+
+                const failedStatus = innerStatusMatches
+                    .map(match => Number(match[1]))
+                    .find(status => status < 200 || status >= 300);
+
+                if (failedStatus) {
+                    throw new Error(`Batch update returned inner HTTP status ${failedStatus}: ${responseText}`);
+                }
+            }
+        );
+    }
+
+    /**
+     * Publishes multiple web resources using one PublishXml request.
+     */
+    static async publishWebResources(
+        connection: Connection,
+        webResourceIds: string[]
+    ): Promise<void> {
+        if (webResourceIds.length === 0) {
+            return;
+        }
+        await this.publishXML(connection, webResourceIds);
     }
 
     /**
@@ -472,6 +552,44 @@ export class CrmWebAPI {
         })(); // Immediately invoke the async IIFE
     }
 
+    private static async makeRawApiRequest(
+        connection: Connection,
+        method: string,
+        apiQuery: string,
+        body: string,
+        contentType: string,
+        validateResponseText?: (responseText: string) => void
+    ): Promise<string> {
+        await connection.connect();
+
+        const accessToken = connection.getAccessToken();
+        if (!accessToken) {
+            throw new Error("No access token available for API request. Please connect first.");
+        }
+
+        const headers: { [key: string]: string } = {
+            "OData-MaxVersion": ODATA_MAX_VERSION,
+            "OData-Version": ODATA_VERSION,
+            "Accept": "application/json",
+            "Content-Type": contentType,
+            "Authorization": "Bearer " + accessToken,
+        };
+
+        const res: Response = await fetch(connection.getConnectionURL() + apiQuery, {
+            method,
+            headers,
+            body,
+        });
+        const responseText = await res.text();
+
+        if (!res.ok) {
+            throw new Error(`API request to '${apiQuery}' completed with status ${res.status}: ${responseText || res.statusText}`);
+        }
+
+        validateResponseText?.(responseText);
+        return responseText;
+    }
+
     /**
      * Retrieves multiple records from a Dynamics 365 entity set.
      * Expects the response to be an OData collection with a 'value' property containing an array of records.
@@ -550,20 +668,23 @@ export class CrmWebAPI {
      * Publishes XML changes to Dynamics 365. Used for publishing web resources.
      *
      * @param {Connection} connection The active Dynamics 365 connection object.
-     * @param {string} webResourceId The GUID of the web resource to include in the publish XML.
+     * @param {string[]} webResourceIds The GUIDs of the web resources to include in the publish XML.
      * @returns {Promise<void>} A promise that resolves when the PublishXml action is successful.
      * @throws {Error} If the PublishXml request fails.
      * @private
      */
     private static async publishXML(
         connection: Connection,
-        webResourceId: string
+        webResourceIds: string[]
     ): Promise<void> { 
         const apiVersion = ConfigurationService.getDynamicsAPIVersion();
+        const webResourceXml = webResourceIds
+            .map(webResourceId => `<webresource>{${webResourceId}}</webresource>`)
+            .join("");
         // Construct the ParameterXml required by the PublishXml action.
         const parameters: PublishXmlParams = { 
             ParameterXml:
-                `<importexportxml><webresources><webresource>{${webResourceId}}</webresource></webresources></importexportxml>`,
+                `<importexportxml><webresources>${webResourceXml}</webresources></importexportxml>`,
         };
         const publishQuery = `${API_DATA_V}${apiVersion}/PublishXml`; // The OData action path.
         // PublishXml action might return a specific response or just a success status.

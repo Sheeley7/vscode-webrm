@@ -55,6 +55,15 @@ async function prepareWebResourceFilePath(webResourceName: string): Promise<stri
     return path.normalize(fullFilePath);
 }
 
+function getLocalFilePathForWebResourceName(webResourceName: string): string | undefined {
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders || workspaceFolders.length === 0) {
+        return undefined;
+    }
+
+    return path.normalize(path.join(workspaceFolders[0].uri.fsPath, ...webResourceName.split("/")));
+}
+
 function getWebResourceNameFromDocument(document: vscode.TextDocument): { filePath: string; webResourceName?: string } {
     const workspaceFolders = vscode.workspace.workspaceFolders;
     let rawFilePath = document.uri.fsPath || document.fileName;
@@ -89,6 +98,18 @@ function getWebResourceNameFromDocument(document: vscode.TextDocument): { filePa
         filePath,
         webResourceName: relativePath.split(path.sep).join("/"),
     };
+}
+
+async function readFileBase64IfExists(filePath: string): Promise<string | undefined> {
+    try {
+        const content = await fs.promises.readFile(filePath);
+        return content.toString("base64");
+    } catch (error: any) {
+        if (error.code === "ENOENT") {
+            return undefined;
+        }
+        throw error;
+    }
 }
 
 /**
@@ -413,6 +434,271 @@ export function registerCommands(
                 vscode.window.showErrorMessage(
                     `Error removing solution '${solution.getFriendlyName()}' from favorites: ${message}`
                 );
+            }
+        }
+    );
+
+    const wrmPushSolutionLocalFiles = vscode.commands.registerCommand(
+        "wrm.pushSolutionLocalFiles",
+        async (solution: Solution) => {
+            if (!solution || !solution.solutionId) {
+                vscode.window.showErrorMessage("No solution selected to push local files.");
+                return;
+            }
+            solutionExplorer.setSelectedSolution(solution);
+
+            const connection = connectionStatusController.getCurrentConnection();
+            if (!connection) {
+                vscode.window.showErrorMessage("No active connection. Please connect to an environment before pushing local files.");
+                return;
+            }
+
+            const solutionName = solution.getFriendlyName();
+            const candidates: Array<{ webResource: WebResource; localPath: string; base64Content: string }> = [];
+            let wasCancelled = false;
+
+            try {
+                await vscode.window.withProgress(
+                    {
+                        location: vscode.ProgressLocation.Notification,
+                        title: `Checking local files for '${solutionName}'...`,
+                        cancellable: true,
+                    },
+                    async (progress, token) => {
+                        token.onCancellationRequested(() => {
+                            wasCancelled = true;
+                            vscode.window.showInformationMessage("Push local files cancelled by user.");
+                        });
+
+                        await connection.connect();
+                        if (token.isCancellationRequested) return;
+
+                        const webResources = await CrmWebAPI.getWebResources(connection, solution);
+                        const total = webResources.length || 1;
+
+                        for (let i = 0; i < webResources.length; i++) {
+                            if (token.isCancellationRequested) return;
+
+                            const webResource = webResources[i];
+                            const localPath = getLocalFilePathForWebResourceName(webResource.webResourceName);
+                            if (!localPath) {
+                                throw new Error("No workspace folder is open. Please open a folder before pushing local files.");
+                            }
+
+                            const localContentBase64 = await readFileBase64IfExists(localPath);
+                            if (localContentBase64 === undefined) {
+                                progress.report({ increment: 50 / total });
+                                continue;
+                            }
+
+                            const serverDetails = await CrmWebAPI.getWebResourceDetails(connection, webResource);
+                            if (localContentBase64 !== serverDetails.content) {
+                                candidates.push({
+                                    webResource,
+                                    localPath,
+                                    base64Content: localContentBase64,
+                                });
+                            }
+
+                            progress.report({ increment: 50 / total });
+                        }
+                    }
+                );
+
+                if (wasCancelled) {
+                    return;
+                }
+
+                if (candidates.length === 0) {
+                    vscode.window.showInformationMessage(`No local files need to be pushed for solution '${solutionName}'.`);
+                    return;
+                }
+
+                const pushLabel = `Push ${candidates.length} Web Resource${candidates.length === 1 ? "" : "s"}`;
+                const confirm = await vscode.window.showWarningMessage(
+                    `${candidates.length} web resource${candidates.length === 1 ? "" : "s"} in solution '${solutionName}' will be updated on the server from local files. Continue?`,
+                    { modal: true },
+                    pushLabel
+                );
+                if (confirm !== pushLabel) {
+                    vscode.window.showInformationMessage("Push local files cancelled by user.");
+                    return;
+                }
+
+                await vscode.window.withProgress(
+                    {
+                        location: vscode.ProgressLocation.Notification,
+                        title: `Pushing ${candidates.length} web resource${candidates.length === 1 ? "" : "s"} to '${solutionName}'...`,
+                        cancellable: true,
+                    },
+                    async (progress, token) => {
+                        token.onCancellationRequested(() => {
+                            wasCancelled = true;
+                        });
+
+                        if (token.isCancellationRequested) {
+                            vscode.window.showInformationMessage("Push local files cancelled by user.");
+                            return;
+                        }
+
+                        await CrmWebAPI.updateWebResourcesBatch(
+                            connection,
+                            candidates.map(candidate => ({
+                                webResourceId: candidate.webResource.webResourceId,
+                                base64Content: candidate.base64Content,
+                            }))
+                        );
+                        progress.report({ increment: 75 });
+
+                        if (token.isCancellationRequested) {
+                            vscode.window.showInformationMessage("Push local files cancelled by user.");
+                            return;
+                        }
+
+                        await CrmWebAPI.publishWebResources(
+                            connection,
+                            candidates.map(candidate => candidate.webResource.webResourceId)
+                        );
+                        progress.report({ increment: 25 });
+
+                        for (const candidate of candidates) {
+                            connectionStatusController.addSyncedWebResource(candidate.localPath, candidate.webResource.webResourceId);
+                            setFileSyncState(candidate.localPath, candidate.webResource.webResourceId, true);
+                        }
+                    }
+                );
+
+                if (wasCancelled) {
+                    return;
+                }
+
+                vscode.window.showInformationMessage(`Pushed ${candidates.length} web resource${candidates.length === 1 ? "" : "s"} to Dynamics for solution '${solutionName}'.`);
+            } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : String(error);
+                vscode.window.showErrorMessage(`Failed to push local files for solution '${solutionName}': ${message}`);
+            }
+        }
+    );
+
+    const wrmPullSolutionServerFiles = vscode.commands.registerCommand(
+        "wrm.pullSolutionServerFiles",
+        async (solution: Solution) => {
+            if (!solution || !solution.solutionId) {
+                vscode.window.showErrorMessage("No solution selected to replace local files.");
+                return;
+            }
+            solutionExplorer.setSelectedSolution(solution);
+
+            const connection = connectionStatusController.getCurrentConnection();
+            if (!connection) {
+                vscode.window.showErrorMessage("No active connection. Please connect to an environment before replacing local files.");
+                return;
+            }
+
+            const solutionName = solution.getFriendlyName();
+            const candidates: Array<{ webResource: WebResource; localPath: string; serverContent: string }> = [];
+            let wasCancelled = false;
+
+            try {
+                await vscode.window.withProgress(
+                    {
+                        location: vscode.ProgressLocation.Notification,
+                        title: `Checking server files for '${solutionName}'...`,
+                        cancellable: true,
+                    },
+                    async (progress, token) => {
+                        token.onCancellationRequested(() => {
+                            wasCancelled = true;
+                            vscode.window.showInformationMessage("Replace local files cancelled by user.");
+                        });
+
+                        await connection.connect();
+                        if (token.isCancellationRequested) return;
+
+                        const webResources = await CrmWebAPI.getWebResources(connection, solution);
+                        const total = webResources.length || 1;
+
+                        for (let i = 0; i < webResources.length; i++) {
+                            if (token.isCancellationRequested) return;
+
+                            const webResource = webResources[i];
+                            const localPath = await prepareWebResourceFilePath(webResource.webResourceName);
+                            if (!localPath) {
+                                throw new Error(`Could not prepare local path for '${webResource.webResourceName}'.`);
+                            }
+
+                            const serverDetails = await CrmWebAPI.getWebResourceDetails(connection, webResource);
+                            const localContentBase64 = await readFileBase64IfExists(localPath);
+                            if (localContentBase64 !== serverDetails.content) {
+                                candidates.push({
+                                    webResource,
+                                    localPath,
+                                    serverContent: serverDetails.content,
+                                });
+                            }
+
+                            progress.report({ increment: 50 / total });
+                        }
+                    }
+                );
+
+                if (wasCancelled) {
+                    return;
+                }
+
+                if (candidates.length === 0) {
+                    vscode.window.showInformationMessage(`No local files need to be replaced for solution '${solutionName}'.`);
+                    return;
+                }
+
+                const replaceLabel = `Replace ${candidates.length} Local File${candidates.length === 1 ? "" : "s"}`;
+                const confirm = await vscode.window.showWarningMessage(
+                    `${candidates.length} local file${candidates.length === 1 ? "" : "s"} for solution '${solutionName}' will be replaced with the server version. Continue?`,
+                    { modal: true },
+                    replaceLabel
+                );
+                if (confirm !== replaceLabel) {
+                    vscode.window.showInformationMessage("Replace local files cancelled by user.");
+                    return;
+                }
+
+                await vscode.window.withProgress(
+                    {
+                        location: vscode.ProgressLocation.Notification,
+                        title: `Replacing ${candidates.length} local file${candidates.length === 1 ? "" : "s"} for '${solutionName}'...`,
+                        cancellable: true,
+                    },
+                    async (progress, token) => {
+                        token.onCancellationRequested(() => {
+                            wasCancelled = true;
+                        });
+                        const total = candidates.length || 1;
+                        for (const candidate of candidates) {
+                            if (token.isCancellationRequested) {
+                                vscode.window.showInformationMessage("Replace local files cancelled by user.");
+                                return;
+                            }
+
+                            await fs.promises.writeFile(
+                                candidate.localPath,
+                                candidate.serverContent,
+                                { encoding: "base64" }
+                            );
+                            connectionStatusController.addSyncedWebResource(candidate.localPath, candidate.webResource.webResourceId);
+                            setFileSyncState(candidate.localPath, candidate.webResource.webResourceId, true);
+                            progress.report({ increment: 100 / total });
+                        }
+                    }
+                );
+
+                if (wasCancelled) {
+                    return;
+                }
+
+                vscode.window.showInformationMessage(`Replaced ${candidates.length} local file${candidates.length === 1 ? "" : "s"} from Dynamics for solution '${solutionName}'.`);
+            } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : String(error);
+                vscode.window.showErrorMessage(`Failed to replace local files for solution '${solutionName}': ${message}`);
             }
         }
     );
@@ -784,6 +1070,8 @@ export function registerCommands(
         wrmGetWebResources,
         wrmAddFavoriteSolution,
         wrmRemoveFavoriteSolution,
+        wrmPushSolutionLocalFiles,
+        wrmPullSolutionServerFiles,
         wrmOpenWebResource,
         wrmPublishWebResource,
         wrmFilterSolutions,

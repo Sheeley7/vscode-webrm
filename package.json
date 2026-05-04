@@ -39,6 +39,8 @@
     "onCommand:wrm.openWebResource",
     "onCommand:wrm.addFavoriteSolution",
     "onCommand:wrm.removeFavoriteSolution",
+    "onCommand:wrm.pushSolutionLocalFiles",
+    "onCommand:wrm.pullSolutionServerFiles",
     "onCommand:wrm.filterSolutions",
     "onCommand:wrm.toggleSolutionSortOrder",
     "onCommand:wrm.copyConnectionUrl"
@@ -93,6 +95,18 @@
         "title": "Remove Favorite",
         "category": "Web Resource Manager",
         "icon": "$(trash)"
+      },
+      {
+        "command": "wrm.pushSolutionLocalFiles",
+        "title": "Push Local Files to Server",
+        "category": "Web Resource Manager",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "wrm.pullSolutionServerFiles",
+        "title": "Replace Local Files with Server",
+        "category": "Web Resource Manager",
+        "icon": "$(cloud-download)"
       },
       {
         "command": "wrm.filterSolutions",
@@ -208,6 +222,16 @@
           "command": "wrm.removeFavoriteSolution",
           "when": "view == vscode-solution-explorer && viewItem == solution",
           "icon": "$(trash)"
+        },
+        {
+          "command": "wrm.pushSolutionLocalFiles",
+          "when": "view == vscode-solution-explorer && viewItem == solution",
+          "icon": "$(cloud-upload)"
+        },
+        {
+          "command": "wrm.pullSolutionServerFiles",
+          "when": "view == vscode-solution-explorer && viewItem == solution",
+          "icon": "$(cloud-download)"
         },
         {
           "command": "wrm.openWebResource",
