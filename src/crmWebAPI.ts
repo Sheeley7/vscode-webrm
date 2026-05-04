@@ -65,6 +65,10 @@ interface UpdateRequest {
     [key: string]: string | number | boolean | undefined; // Allows other string-keyed properties.
 }
 
+interface WebResourceBatchDetail extends WebResourceContent {
+    webResourceId: string;
+}
+
 interface WebResourceContentUpdate {
     webResourceId: string;
     base64Content: string;
@@ -446,6 +450,69 @@ export class CrmWebAPI {
     }
 
     /**
+     * Retrieves web resource details in non-transactional OData batch GET requests.
+     */
+    static async getWebResourceDetailsBatch(
+        connection: Connection,
+        webResources: WebResource[],
+        batchSize: number = 10
+    ): Promise<Map<string, WebResourceBatchDetail>> {
+        const details = new Map<string, WebResourceBatchDetail>();
+        if (webResources.length === 0) {
+            return details;
+        }
+
+        const apiVersion = ConfigurationService.getDynamicsAPIVersion();
+        for (let i = 0; i < webResources.length; i += batchSize) {
+            const batchWebResources = webResources.slice(i, i + batchSize);
+            const batchBoundary = this.createBoundary("batch");
+            const crlf = "\r\n";
+            const requestParts: string[] = [];
+
+            for (const webResource of batchWebResources) {
+                requestParts.push(
+                    `--${batchBoundary}`,
+                    "Content-Type: application/http",
+                    "Content-Transfer-Encoding: binary",
+                    "",
+                    `GET ${API_DATA_V}${apiVersion}/${ENTITY_WEBRESOURCE_SET}(${webResource.webResourceId})?$select=content,modifiedon&$expand=modifiedby($select=fullname) HTTP/1.1`,
+                    "Accept: application/json",
+                    "",
+                );
+            }
+
+            const batchBody = [
+                ...requestParts,
+                `--${batchBoundary}--`,
+                "",
+            ].join(crlf);
+
+            const responseText = await this.makeRawApiRequest(
+                connection,
+                "POST",
+                `${API_DATA_V}${apiVersion}/$batch`,
+                batchBody,
+                `multipart/mixed; boundary="${batchBoundary}"`
+            );
+
+            const responsePayloads = this.parseBatchJsonResponses(responseText, batchWebResources.length);
+            responsePayloads.forEach((payload, index) => {
+                const webResource = batchWebResources[index];
+                const webResourceDetails = payload as Partial<WebResourceContent>;
+                if (typeof webResourceDetails.content !== "string") {
+                    throw new Error(`Web resource content for '${webResource.webResourceName}' not found or in unexpected format.`);
+                }
+                details.set(webResource.webResourceId, {
+                    ...(webResourceDetails as WebResourceContent),
+                    webResourceId: webResource.webResourceId,
+                });
+            });
+        }
+
+        return details;
+    }
+
+    /**
      * Publishes multiple web resources using one PublishXml request.
      */
     static async publishWebResources(
@@ -588,6 +655,37 @@ export class CrmWebAPI {
 
         validateResponseText?.(responseText);
         return responseText;
+    }
+
+    private static parseBatchJsonResponses(responseText: string, expectedCount: number): unknown[] {
+        const responseSections = responseText.split(/--batchresponse_[^\r\n]+/g);
+        const payloads: unknown[] = [];
+
+        for (const section of responseSections) {
+            const statusMatch = section.match(/HTTP\/1\.1\s+(\d{3})/);
+            if (!statusMatch) {
+                continue;
+            }
+
+            const status = Number(statusMatch[1]);
+            if (status < 200 || status >= 300) {
+                throw new Error(`Batch retrieval returned inner HTTP status ${status}: ${section}`);
+            }
+
+            const jsonStart = section.indexOf("{");
+            const jsonEnd = section.lastIndexOf("}");
+            if (jsonStart === -1 || jsonEnd === -1 || jsonEnd < jsonStart) {
+                throw new Error(`Batch retrieval response did not include a JSON payload: ${section}`);
+            }
+
+            payloads.push(JSON.parse(section.slice(jsonStart, jsonEnd + 1)));
+        }
+
+        if (payloads.length !== expectedCount) {
+            throw new Error(`Batch retrieval returned ${payloads.length} responses for ${expectedCount} requests: ${responseText}`);
+        }
+
+        return payloads;
     }
 
     /**

@@ -169,6 +169,14 @@
         {
           "command": "wrm.publishWebResource",
           "when": "activeEditor"
+        },
+        {
+          "command": "wrm.pushSolutionLocalFiles",
+          "when": "wrm.solutionLinked"
+        },
+        {
+          "command": "wrm.pullSolutionServerFiles",
+          "when": "wrm.solutionLinked"
         }
       ],
       "view/title": [
@@ -189,6 +197,18 @@
           "when": "view == vscode-solution-explorer",
           "group": "navigation@3",
           "icon": "$(filter)"
+        },
+        {
+          "command": "wrm.pushSolutionLocalFiles",
+          "when": "view == vscode-webresource-explorer && wrm.solutionLinked",
+          "group": "navigation@1",
+          "icon": "$(cloud-upload)"
+        },
+        {
+          "command": "wrm.pullSolutionServerFiles",
+          "when": "view == vscode-webresource-explorer && wrm.solutionLinked",
+          "group": "navigation@2",
+          "icon": "$(cloud-download)"
         }
       ],
       "view/item/context": [
@@ -222,16 +242,6 @@
           "command": "wrm.removeFavoriteSolution",
           "when": "view == vscode-solution-explorer && viewItem == solution",
           "icon": "$(trash)"
-        },
-        {
-          "command": "wrm.pushSolutionLocalFiles",
-          "when": "view == vscode-solution-explorer && viewItem == solution",
-          "icon": "$(cloud-upload)"
-        },
-        {
-          "command": "wrm.pullSolutionServerFiles",
-          "when": "view == vscode-solution-explorer && viewItem == solution",
-          "icon": "$(cloud-download)"
         },
         {
           "command": "wrm.openWebResource",

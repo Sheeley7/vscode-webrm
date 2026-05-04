@@ -303,6 +303,7 @@ async function showSettingsForm(
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     try {
         await vscode.commands.executeCommand("setContext", "wrm.viewsReady", false);
+        await vscode.commands.executeCommand("setContext", "wrm.solutionLinked", false);
 
         // Register providers first so the activity bar icon and tree views appear as soon as the extension is ready.
         initializeStatusBar();
@@ -313,7 +314,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const solutionExplorer = new SolutionExplorer(context, []);
         const webResourceExplorer = new WebResourceExplorer([]);
         const connectionStatusController = new ConnectionStatusController(statusBar);
-        const selectedSolutionListener = solutionExplorer.onDidChangeSelectedSolution(updateSolutionStatusBar);
+        const selectedSolutionListener = solutionExplorer.onDidChangeSelectedSolution(solution => {
+            updateSolutionStatusBar(solution);
+            void vscode.commands.executeCommand("setContext", "wrm.solutionLinked", !!solution);
+        });
 
         registerTreeDataProviders(context, connectionExplorer, solutionExplorer, webResourceExplorer);
 
@@ -376,6 +380,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     } catch (error: unknown) {
         await vscode.commands.executeCommand("setContext", "wrm.viewsReady", false);
+        await vscode.commands.executeCommand("setContext", "wrm.solutionLinked", false);
         const message = error instanceof Error ? error.message : String(error);
         vscode.window.showErrorMessage(`Error activating Web Resource Manager extension: ${message}`);
         // Log the full error to the console for more detailed debugging.

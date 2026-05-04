@@ -440,9 +440,10 @@ export function registerCommands(
 
     const wrmPushSolutionLocalFiles = vscode.commands.registerCommand(
         "wrm.pushSolutionLocalFiles",
-        async (solution: Solution) => {
+        async (solution?: Solution) => {
+            solution = solution ?? solutionExplorer.getSelectedSolution();
             if (!solution || !solution.solutionId) {
-                vscode.window.showErrorMessage("No solution selected to push local files.");
+                vscode.window.showErrorMessage("Link a solution before pushing local files.");
                 return;
             }
             solutionExplorer.setSelectedSolution(solution);
@@ -474,6 +475,7 @@ export function registerCommands(
                         if (token.isCancellationRequested) return;
 
                         const webResources = await CrmWebAPI.getWebResources(connection, solution);
+                        const serverDetailsById = await CrmWebAPI.getWebResourceDetailsBatch(connection, webResources, 10);
                         const total = webResources.length || 1;
 
                         for (let i = 0; i < webResources.length; i++) {
@@ -491,7 +493,10 @@ export function registerCommands(
                                 continue;
                             }
 
-                            const serverDetails = await CrmWebAPI.getWebResourceDetails(connection, webResource);
+                            const serverDetails = serverDetailsById.get(webResource.webResourceId);
+                            if (!serverDetails) {
+                                throw new Error(`Could not retrieve server details for '${webResource.webResourceName}'.`);
+                            }
                             if (localContentBase64 !== serverDetails.content) {
                                 candidates.push({
                                     webResource,
@@ -582,9 +587,10 @@ export function registerCommands(
 
     const wrmPullSolutionServerFiles = vscode.commands.registerCommand(
         "wrm.pullSolutionServerFiles",
-        async (solution: Solution) => {
+        async (solution?: Solution) => {
+            solution = solution ?? solutionExplorer.getSelectedSolution();
             if (!solution || !solution.solutionId) {
-                vscode.window.showErrorMessage("No solution selected to replace local files.");
+                vscode.window.showErrorMessage("Link a solution before replacing local files.");
                 return;
             }
             solutionExplorer.setSelectedSolution(solution);
@@ -616,6 +622,7 @@ export function registerCommands(
                         if (token.isCancellationRequested) return;
 
                         const webResources = await CrmWebAPI.getWebResources(connection, solution);
+                        const serverDetailsById = await CrmWebAPI.getWebResourceDetailsBatch(connection, webResources, 10);
                         const total = webResources.length || 1;
 
                         for (let i = 0; i < webResources.length; i++) {
@@ -627,7 +634,10 @@ export function registerCommands(
                                 throw new Error(`Could not prepare local path for '${webResource.webResourceName}'.`);
                             }
 
-                            const serverDetails = await CrmWebAPI.getWebResourceDetails(connection, webResource);
+                            const serverDetails = serverDetailsById.get(webResource.webResourceId);
+                            if (!serverDetails) {
+                                throw new Error(`Could not retrieve server details for '${webResource.webResourceName}'.`);
+                            }
                             const localContentBase64 = await readFileBase64IfExists(localPath);
                             if (localContentBase64 !== serverDetails.content) {
                                 candidates.push({
