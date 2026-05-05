@@ -304,6 +304,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     try {
         await vscode.commands.executeCommand("setContext", "wrm.viewsReady", false);
         await vscode.commands.executeCommand("setContext", "wrm.solutionLinked", false);
+        await vscode.commands.executeCommand("setContext", "wrm.connected", false);
 
         // Register providers first so the activity bar icon and tree views appear as soon as the extension is ready.
         initializeStatusBar();
@@ -381,6 +382,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     } catch (error: unknown) {
         await vscode.commands.executeCommand("setContext", "wrm.viewsReady", false);
         await vscode.commands.executeCommand("setContext", "wrm.solutionLinked", false);
+        await vscode.commands.executeCommand("setContext", "wrm.connected", false);
         const message = error instanceof Error ? error.message : String(error);
         vscode.window.showErrorMessage(`Error activating Web Resource Manager extension: ${message}`);
         // Log the full error to the console for more detailed debugging.

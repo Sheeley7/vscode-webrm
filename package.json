@@ -36,6 +36,7 @@
     "onCommand:wrm.removeConnection",
     "onCommand:wrm.getWebResources",
     "onCommand:wrm.publishWebResource",
+    "onCommand:wrm.pullCurrentFileFromServer",
     "onCommand:wrm.openWebResource",
     "onCommand:wrm.addFavoriteSolution",
     "onCommand:wrm.removeFavoriteSolution",
@@ -77,6 +78,12 @@
         "title": "Dynamics: Publish Web Resource",
         "category": "Web Resource Manager",
         "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "wrm.pullCurrentFileFromServer",
+        "title": "Dynamics: Pull Current File from Server",
+        "category": "Web Resource Manager",
+        "icon": "$(cloud-download)"
       },
       {
         "command": "wrm.openWebResource",
@@ -250,7 +257,21 @@
           "icon": "$(cloud-download)"
         }
       ],
-      "editor/context": []
+      "editor/context": [],
+      "editor/title": [
+        {
+          "command": "wrm.publishWebResource",
+          "when": "resourceScheme == file && wrm.viewsReady && wrm.connected && wrm.solutionLinked",
+          "group": "navigation@1",
+          "icon": "$(cloud-upload)"
+        },
+        {
+          "command": "wrm.pullCurrentFileFromServer",
+          "when": "resourceScheme == file && wrm.viewsReady && wrm.connected && wrm.solutionLinked",
+          "group": "navigation@2",
+          "icon": "$(cloud-download)"
+        }
+      ]
     },
     "configuration": {
       "type": "object",

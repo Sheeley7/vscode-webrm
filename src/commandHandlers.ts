@@ -128,6 +128,42 @@ function resolveSolutionArgument(solutionArg: unknown, solutionExplorer: Solutio
     return solutionExplorer.getSelectedSolution();
 }
 
+async function confirmPublishIfModifiedByOtherUser(
+    connection: Connection,
+    webResourceName: string,
+    webResourceId: string,
+    localPath: string
+): Promise<boolean> {
+    const currentUser = connection.getConnectionUserName();
+    if (!currentUser) {
+        return true;
+    }
+
+    const webResource = new WebResource(
+        webResourceName,
+        webResourceId,
+        path.basename(webResourceName),
+        localPath,
+        "",
+        "file"
+    );
+    const serverDetails = await CrmWebAPI.getWebResourceDetails(connection, webResource);
+    const lastModifiedBy = serverDetails.modifiedby?.fullname;
+
+    if (!lastModifiedBy || lastModifiedBy === currentUser) {
+        return true;
+    }
+
+    const lastModifiedOn = new Date(serverDetails.modifiedon).toLocaleString();
+    const continueChoice = await vscode.window.showWarningMessage(
+        `The server version of '${webResourceName}' was last changed by ${lastModifiedBy} on ${lastModifiedOn}. You are signed in as ${currentUser}. Publishing will overwrite the server version.`,
+        { modal: true },
+        "Continue Publish"
+    );
+
+    return continueChoice === "Continue Publish";
+}
+
 /**
  * Registers all commands for the extension.
  * Each command is wrapped in a try-catch block for robust error handling.
@@ -271,6 +307,8 @@ export function registerCommands(
                     solutionExplorer.clearSolutions();
                     webResourceExplorer.clearWebResources();
                     connectionStatusController.disconnect();
+                    await vscode.commands.executeCommand("setContext", "wrm.connected", false);
+                    await vscode.commands.executeCommand("setContext", "wrm.solutionLinked", false);
                     resetAllFileSyncState();
                 }
                 vscode.window.showInformationMessage(`Connection '${connection.label}' removed successfully.`);
@@ -312,6 +350,7 @@ export function registerCommands(
                         
                         progress.report({ increment: 20, message: "Authenticating..." });
                         await connectionStatusController.connect(); // Handles authentication
+                        await vscode.commands.executeCommand("setContext", "wrm.connected", true);
                         resetAllFileSyncState();
 
                         if (token.isCancellationRequested) return;
@@ -348,6 +387,8 @@ export function registerCommands(
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(`Failed to connect to '${connection.label}': ${message}`);
                 connectionStatusController.disconnect(); // Ensure disconnected state on failure
+                await vscode.commands.executeCommand("setContext", "wrm.connected", false);
+                await vscode.commands.executeCommand("setContext", "wrm.solutionLinked", false);
             }
         }
     );
@@ -827,6 +868,106 @@ export function registerCommands(
     );
 
     /**
+     * Command: Pull the active file from the matching server web resource.
+     */
+    const wrmPullCurrentFileFromServer = vscode.commands.registerCommand(
+        "wrm.pullCurrentFileFromServer",
+        async () => {
+            try {
+                const activeEditor = vscode.window.activeTextEditor;
+                if (!activeEditor) {
+                    vscode.window.showInformationMessage("No active editor. Please open a web resource file to pull from the server.");
+                    return;
+                }
+
+                const document = activeEditor.document;
+                const baseName = path.basename(document.fileName);
+                const { filePath: currentPath, webResourceName } = getWebResourceNameFromDocument(document);
+
+                if (!webResourceName) {
+                    vscode.window.showErrorMessage(
+                        `'${baseName}' is not inside the current workspace. Open the file from this workspace before pulling from the server.`
+                    );
+                    return;
+                }
+
+                const connection = connectionStatusController.getCurrentConnection();
+                if (!connection) {
+                    vscode.window.showErrorMessage("No active connection. Please connect to an environment before pulling from the server.");
+                    return;
+                }
+
+                await vscode.window.withProgress(
+                    {
+                        location: vscode.ProgressLocation.Notification,
+                        title: `Pulling '${webResourceName}' from Dynamics...`,
+                        cancellable: true,
+                    },
+                    async (progress, token) => {
+                        token.onCancellationRequested(() => {
+                            vscode.window.showInformationMessage("Pull from server cancelled by user.");
+                        });
+
+                        await connection.connect();
+                        if (token.isCancellationRequested) return;
+                        progress.report({ increment: 25 });
+
+                        const serverWebResource = await CrmWebAPI.getWebResourceByName(connection, webResourceName);
+                        if (!serverWebResource) {
+                            vscode.window.showErrorMessage(`Web resource '${webResourceName}' does not exist on the server.`);
+                            return;
+                        }
+
+                        const webResource = new WebResource(
+                            serverWebResource.name,
+                            serverWebResource.webresourceid,
+                            path.basename(serverWebResource.name),
+                            currentPath,
+                            "",
+                            "file"
+                        );
+                        const serverDetails = await CrmWebAPI.getWebResourceDetails(connection, webResource);
+                        if (token.isCancellationRequested) return;
+                        progress.report({ increment: 50 });
+
+                        const localContentBase64 = await readFileBase64IfExists(currentPath);
+                        if (localContentBase64 !== undefined && localContentBase64 !== serverDetails.content) {
+                            const overwriteChoice = await vscode.window.showWarningMessage(
+                                `The server version of '${webResourceName}' is different from your local version. Pulling it will overwrite your local file.`,
+                                { modal: true },
+                                "Overwrite Local File"
+                            );
+
+                            if (overwriteChoice !== "Overwrite Local File") {
+                                vscode.window.showInformationMessage("Pull from server cancelled by user.");
+                                return;
+                            }
+                        }
+
+                        await fs.promises.mkdir(path.dirname(currentPath), { recursive: true });
+                        await fs.promises.writeFile(
+                            currentPath,
+                            serverDetails.content,
+                            { encoding: "base64" }
+                        );
+                        connectionStatusController.addSyncedWebResource(currentPath, serverWebResource.webresourceid);
+                        const fileContent = await fs.promises.readFile(currentPath, "utf8");
+                        const hash = computeFileHash(fileContent);
+                        setFileSyncState(currentPath, serverWebResource.webresourceid, true, hash);
+
+                        const doc = await vscode.workspace.openTextDocument(currentPath);
+                        await vscode.window.showTextDocument(doc);
+                        progress.report({ increment: 25 });
+                    }
+                );
+            } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : String(error);
+                vscode.window.showErrorMessage(`Failed to pull current file from server: ${message}`);
+            }
+        }
+    );
+
+    /**
      * Command: Publish the active web resource.
      * Publishes changes from the active editor to Dynamics 365.
      */
@@ -944,6 +1085,19 @@ export function registerCommands(
                         if (!webResourceId) {
                             vscode.window.showErrorMessage(`Could not resolve Dynamics web resource '${webResourceName}'.`);
                             return;
+                        }
+
+                        if (!addedToSelectedSolution) {
+                            const shouldContinue = await confirmPublishIfModifiedByOtherUser(
+                                connection,
+                                webResourceName,
+                                webResourceId,
+                                currentPath
+                            );
+                            if (!shouldContinue) {
+                                vscode.window.showInformationMessage("Publish cancelled by user.");
+                                return;
+                            }
                         }
 
                         if (token.isCancellationRequested) return;
@@ -1099,6 +1253,7 @@ export function registerCommands(
         wrmPushSolutionLocalFiles,
         wrmPullSolutionServerFiles,
         wrmOpenWebResource,
+        wrmPullCurrentFileFromServer,
         wrmPublishWebResource,
         wrmFilterSolutions,
         wrmToggleSolutionSortOrder,
