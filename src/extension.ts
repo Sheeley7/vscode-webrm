@@ -88,7 +88,7 @@ function initializeFileStatusBar(): void {
 }
 
 function initializeSolutionStatusBar(): void {
-    solutionStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 98);
+    solutionStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99.5);
     solutionStatusBar.text = "Solution: None";
     solutionStatusBar.tooltip = "Selected Dynamics solution for publishing web resources.";
     solutionStatusBar.show();
