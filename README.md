@@ -2,6 +2,10 @@
 
 Dynamics 365 Web Resource Extension for Visual Studio Code.
 
+## Important Update
+
+Version 1.1.9 includes significant workflow changes. Publishing no longer depends on opening a file from the extension first, solutions are now linked before using solution-level push/pull actions, and bulk sync actions can update multiple web resources at once. Please review the 1.1.9 release notes before upgrading.
+
 ## Features
 
 This extension allows you to connect to Dynamics 365, modify, and publish various web resources directly from VS Code.
@@ -19,7 +23,6 @@ This extension contributes the following settings:
 - `webRM.dynamicsAPIVersion`: (REQUIRED) API Version for Dynamics 365 Web API
 - `webRM.solutionNameFilter`: Used to filter solution list retrieved from Dynamics
 - `webRM.solutionSortAscending`: Used to change sort order of returned solution list
-- `webRM.pullLatestVersionFromServer`: Pull latest version from CRM server when opening a web resource file.
 
 ## Known Issues
 
@@ -28,6 +31,19 @@ This extension contributes the following settings:
 Currently, this extension only works for Dynamics 365 Online. It has only been tested with version 9.0+.
 
 ## Release Notes
+
+### 1.1.9
+- Updated MSAL to `@azure/msal-node` 5.1.5 and raised the VS Code engine/runtime target for Node 20 support.
+- Removed the `uuid` dependency and now use Node's built-in UUID generation.
+- Added selected-solution tracking and a status bar indicator for the solution used when publishing.
+- Publishing no longer requires opening a web resource from the extension first. The active file is matched to a server web resource by workspace-relative path.
+- If the active file is not in the selected solution, the extension prompts to add it before publishing.
+- If the active file does not exist on the server, the extension prompts to create it, add it to the selected solution, and publish it.
+- Removed `webRM.pullLatestVersionFromServer`. Opening a web resource from the extension now always pulls the server version, while still warning when an existing local file differs from a server version modified by another user.
+- Cleaned up duplicate Cancel buttons in publish confirmation dialogs.
+- Added linked-solution actions in the Web Resources toolbar for pushing local files to the server or replacing local files with server versions.
+- Bulk push only updates web resources in the linked solution, confirms the number of changed resources, batches content updates in groups, and publishes all changed web resources in one publish request.
+- Bulk replace only updates local files for web resources in the linked solution and confirms the number of local files that will be replaced.
 
 ### 1.1.8
 - Added a new setting `webRM.pullLatestVersionFromServer` to control whether the latest version of a web resource is pulled from the CRM server when a file is opened.

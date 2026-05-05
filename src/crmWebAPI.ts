@@ -28,6 +28,12 @@ interface RawWebResource {
     // Additional properties can be added.
 }
 
+interface ServerWebResource {
+    webresourceid: string;
+    name: string;
+    webresourcetype?: number;
+}
+
 /**
  * Represents the structure of the response when fetching the content of a single web resource.
  */
@@ -57,6 +63,15 @@ interface UpdateRequest {
     content?: string; // Base64 content for web resources.
     // Other fields for different entities can be added, e.g., 'description', 'displayname'.
     [key: string]: string | number | boolean | undefined; // Allows other string-keyed properties.
+}
+
+interface WebResourceBatchDetail extends WebResourceContent {
+    webResourceId: string;
+}
+
+interface WebResourceContentUpdate {
+    webResourceId: string;
+    base64Content: string;
 }
 
 /**
@@ -91,6 +106,40 @@ const QUERY_ORDERBY = "&$orderby=";
  * This class encapsulates data retrieval and modification operations.
  */
 export class CrmWebAPI {
+    private static createBoundary(prefix: string): string {
+        return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    }
+
+    private static escapeODataString(value: string): string {
+        return value.replace(/'/g, "''");
+    }
+
+    private static getWebResourceTypeFromName(webResourceName: string): number {
+        const extension = path.extname(webResourceName).toLowerCase();
+        const typeByExtension: Record<string, number> = {
+            ".html": 1,
+            ".htm": 1,
+            ".css": 2,
+            ".js": 3,
+            ".xml": 4,
+            ".png": 5,
+            ".jpg": 6,
+            ".jpeg": 6,
+            ".gif": 7,
+            ".xap": 8,
+            ".xsl": 9,
+            ".xslt": 9,
+            ".ico": 10,
+            ".svg": 11,
+            ".resx": 12,
+        };
+        const webResourceType = typeByExtension[extension];
+        if (!webResourceType) {
+            throw new Error(`Unsupported web resource file type '${extension || "(none)"}' for '${webResourceName}'.`);
+        }
+        return webResourceType;
+    }
+
     /**
      * Retrieves a list of solutions from the connected Dynamics 365 environment.
      * Filters solutions based on configuration settings (name filter, visibility, managed status).
@@ -221,6 +270,91 @@ export class CrmWebAPI {
     }
 
     /**
+     * Finds a web resource by its logical name anywhere on the server.
+     */
+    static async getWebResourceByName(connection: Connection, webResourceName: string): Promise<ServerWebResource | null> {
+        const apiVersion = ConfigurationService.getDynamicsAPIVersion();
+        const escapedName = this.escapeODataString(webResourceName);
+        const query =
+            `${API_DATA_V}${apiVersion}/${ENTITY_WEBRESOURCE_SET}` +
+            `${QUERY_SELECT}webresourceid,name,webresourcetype` +
+            `${QUERY_FILTER}name eq '${escapedName}'&$top=1`;
+
+        const results = await this.getRecords<ServerWebResource>(connection, query);
+        return results[0] ?? null;
+    }
+
+    /**
+     * Checks whether a web resource is already part of a solution.
+     */
+    static async isWebResourceInSolution(
+        connection: Connection,
+        solution: Solution,
+        webResourceId: string
+    ): Promise<boolean> {
+        const apiVersion = ConfigurationService.getDynamicsAPIVersion();
+        const query =
+            `${API_DATA_V}${apiVersion}/${ENTITY_MSDYN_SOLUTION_COMPONENT_SUMMARIES}` +
+            `${QUERY_SELECT}msdyn_objectid` +
+            `${QUERY_FILTER}(msdyn_solutionid eq ${solution.solutionId}) and ` +
+            `(msdyn_componenttype eq 61) and (msdyn_objectid eq ${webResourceId})&$top=1`;
+
+        const results = await this.getRecords<RawWebResource>(connection, query);
+        return results.length > 0;
+    }
+
+    /**
+     * Creates a new web resource record using the provided base64 content.
+     */
+    static async createWebResource(
+        connection: Connection,
+        webResourceName: string,
+        base64Content: string
+    ): Promise<ServerWebResource> {
+        const fileName = path.basename(webResourceName);
+        const webResourceType = this.getWebResourceTypeFromName(webResourceName);
+        await this.createRecord(
+            connection,
+            {
+                name: webResourceName,
+                displayname: fileName,
+                webresourcetype: webResourceType,
+                content: base64Content,
+            },
+            ENTITY_WEBRESOURCE_SET
+        );
+
+        const createdWebResource = await this.getWebResourceByName(connection, webResourceName);
+        if (!createdWebResource) {
+            throw new Error(`Created web resource '${webResourceName}', but could not retrieve it from the server.`);
+        }
+        return createdWebResource;
+    }
+
+    /**
+     * Adds an existing web resource to a solution.
+     */
+    static async addWebResourceToSolution(
+        connection: Connection,
+        solution: Solution,
+        webResourceId: string
+    ): Promise<void> {
+        const apiVersion = ConfigurationService.getDynamicsAPIVersion();
+        const addSolutionComponentQuery = `${API_DATA_V}${apiVersion}/AddSolutionComponent`;
+        await this.makeApiRequest<unknown, Record<string, string | number | boolean>>(
+            connection,
+            "POST",
+            addSolutionComponentQuery,
+            {
+                ComponentId: webResourceId,
+                ComponentType: 61,
+                SolutionUniqueName: solution.solutionUniqueName,
+                AddRequiredComponents: false,
+            }
+        );
+    }
+
+    /**
      * Publishes a web resource to Dynamics 365.
      * This involves two steps: updating the web resource content (PATCH) and then publishing it (POST PublishXml).
      *
@@ -248,13 +382,147 @@ export class CrmWebAPI {
             // Step 2: Publish the web resource using PublishXml action.
             await this.publishXML(
                 connection,
-                webResourceId
+                [webResourceId]
             );
         } catch (err: unknown) { // Catching unknown for type safety.
             // Add more context to the error if it's an Error object.
             const message = err instanceof Error ? err.message : String(err);
             throw new Error(`Error publishing web resource (ID: ${webResourceId}): ${message}`);
         }
+    }
+
+    /**
+     * Updates multiple web resource records in a single non-transactional OData batch request.
+     */
+    static async updateWebResourcesBatch(
+        connection: Connection,
+        updates: WebResourceContentUpdate[]
+    ): Promise<void> {
+        if (updates.length === 0) {
+            return;
+        }
+
+        const apiVersion = ConfigurationService.getDynamicsAPIVersion();
+        const batchBoundary = this.createBoundary("batch");
+        const crlf = "\r\n";
+        const requestParts: string[] = [];
+
+        for (const update of updates) {
+            requestParts.push(
+                `--${batchBoundary}`,
+                "Content-Type: application/http",
+                "Content-Transfer-Encoding: binary",
+                "",
+                `PATCH ${API_DATA_V}${apiVersion}/${ENTITY_WEBRESOURCE_SET}(${update.webResourceId}) HTTP/1.1`,
+                "Content-Type: application/json; type=entry",
+                "",
+                JSON.stringify({ content: update.base64Content })
+            );
+        }
+
+        const batchBody = [
+            ...requestParts,
+            `--${batchBoundary}--`,
+            "",
+        ].join(crlf);
+
+        await this.makeRawApiRequest(
+            connection,
+            "POST",
+            `${API_DATA_V}${apiVersion}/$batch`,
+            batchBody,
+            `multipart/mixed; boundary="${batchBoundary}"`,
+            responseText => {
+                const innerStatusMatches = [...responseText.matchAll(/HTTP\/1\.1\s+(\d{3})/g)];
+                if (innerStatusMatches.length !== updates.length) {
+                    throw new Error(`Batch update returned ${innerStatusMatches.length} responses for ${updates.length} updates: ${responseText}`);
+                }
+
+                const failedStatus = innerStatusMatches
+                    .map(match => Number(match[1]))
+                    .find(status => status < 200 || status >= 300);
+
+                if (failedStatus) {
+                    throw new Error(`Batch update returned inner HTTP status ${failedStatus}: ${responseText}`);
+                }
+            }
+        );
+    }
+
+    /**
+     * Retrieves web resource details in non-transactional OData batch GET requests.
+     */
+    static async getWebResourceDetailsBatch(
+        connection: Connection,
+        webResources: WebResource[],
+        batchSize: number = 10
+    ): Promise<Map<string, WebResourceBatchDetail>> {
+        const details = new Map<string, WebResourceBatchDetail>();
+        if (webResources.length === 0) {
+            return details;
+        }
+
+        const apiVersion = ConfigurationService.getDynamicsAPIVersion();
+        for (let i = 0; i < webResources.length; i += batchSize) {
+            const batchWebResources = webResources.slice(i, i + batchSize);
+            const batchBoundary = this.createBoundary("batch");
+            const crlf = "\r\n";
+            const requestParts: string[] = [];
+
+            for (const webResource of batchWebResources) {
+                requestParts.push(
+                    `--${batchBoundary}`,
+                    "Content-Type: application/http",
+                    "Content-Transfer-Encoding: binary",
+                    "",
+                    `GET ${API_DATA_V}${apiVersion}/${ENTITY_WEBRESOURCE_SET}(${webResource.webResourceId})?$select=content,modifiedon&$expand=modifiedby($select=fullname) HTTP/1.1`,
+                    "Accept: application/json",
+                    "",
+                );
+            }
+
+            const batchBody = [
+                ...requestParts,
+                `--${batchBoundary}--`,
+                "",
+            ].join(crlf);
+
+            const responseText = await this.makeRawApiRequest(
+                connection,
+                "POST",
+                `${API_DATA_V}${apiVersion}/$batch`,
+                batchBody,
+                `multipart/mixed; boundary="${batchBoundary}"`
+            );
+
+            const responsePayloads = this.parseBatchJsonResponses(responseText, batchWebResources.length);
+            responsePayloads.forEach((payload, index) => {
+                const webResource = batchWebResources[index];
+                const webResourceDetails = payload as Partial<WebResourceContent>;
+                if (typeof webResourceDetails.content !== "string") {
+                    throw new Error(`Web resource content for '${webResource.webResourceName}' not found or in unexpected format.`);
+                }
+                details.set(webResource.webResourceId, {
+                    ...(webResourceDetails as WebResourceContent),
+                    webResourceId: webResource.webResourceId,
+                });
+            });
+        }
+
+        return details;
+    }
+
+    /**
+     * Publishes multiple web resources using one PublishXml request.
+     */
+    static async publishWebResources(
+        connection: Connection,
+        webResourceIds: string[]
+    ): Promise<void> {
+        if (webResourceIds.length === 0) {
+            return;
+        }
+        await this.publishXML(connection, webResourceIds);
     }
 
     /**
@@ -351,6 +619,75 @@ export class CrmWebAPI {
         })(); // Immediately invoke the async IIFE
     }
 
+    private static async makeRawApiRequest(
+        connection: Connection,
+        method: string,
+        apiQuery: string,
+        body: string,
+        contentType: string,
+        validateResponseText?: (responseText: string) => void
+    ): Promise<string> {
+        await connection.connect();
+
+        const accessToken = connection.getAccessToken();
+        if (!accessToken) {
+            throw new Error("No access token available for API request. Please connect first.");
+        }
+
+        const headers: { [key: string]: string } = {
+            "OData-MaxVersion": ODATA_MAX_VERSION,
+            "OData-Version": ODATA_VERSION,
+            "Accept": "application/json",
+            "Content-Type": contentType,
+            "Authorization": "Bearer " + accessToken,
+        };
+
+        const res: Response = await fetch(connection.getConnectionURL() + apiQuery, {
+            method,
+            headers,
+            body,
+        });
+        const responseText = await res.text();
+
+        if (!res.ok) {
+            throw new Error(`API request to '${apiQuery}' completed with status ${res.status}: ${responseText || res.statusText}`);
+        }
+
+        validateResponseText?.(responseText);
+        return responseText;
+    }
+
+    private static parseBatchJsonResponses(responseText: string, expectedCount: number): unknown[] {
+        const responseSections = responseText.split(/--batchresponse_[^\r\n]+/g);
+        const payloads: unknown[] = [];
+
+        for (const section of responseSections) {
+            const statusMatch = section.match(/HTTP\/1\.1\s+(\d{3})/);
+            if (!statusMatch) {
+                continue;
+            }
+
+            const status = Number(statusMatch[1]);
+            if (status < 200 || status >= 300) {
+                throw new Error(`Batch retrieval returned inner HTTP status ${status}: ${section}`);
+            }
+
+            const jsonStart = section.indexOf("{");
+            const jsonEnd = section.lastIndexOf("}");
+            if (jsonStart === -1 || jsonEnd === -1 || jsonEnd < jsonStart) {
+                throw new Error(`Batch retrieval response did not include a JSON payload: ${section}`);
+            }
+
+            payloads.push(JSON.parse(section.slice(jsonStart, jsonEnd + 1)));
+        }
+
+        if (payloads.length !== expectedCount) {
+            throw new Error(`Batch retrieval returned ${payloads.length} responses for ${expectedCount} requests: ${responseText}`);
+        }
+
+        return payloads;
+    }
+
     /**
      * Retrieves multiple records from a Dynamics 365 entity set.
      * Expects the response to be an OData collection with a 'value' property containing an array of records.
@@ -413,23 +750,39 @@ export class CrmWebAPI {
     }
 
     /**
+     * Creates a record in Dynamics 365 using a POST request.
+     */
+    private static async createRecord(
+        connection: Connection,
+        record: UpdateRequest,
+        entityName: string
+    ): Promise<void> {
+        const apiVersion = ConfigurationService.getDynamicsAPIVersion();
+        const createQuery = `${API_DATA_V}${apiVersion}/${entityName}`;
+        await this.makeApiRequest<void, UpdateRequest>(connection, "POST", createQuery, record);
+    }
+
+    /**
      * Publishes XML changes to Dynamics 365. Used for publishing web resources.
      *
      * @param {Connection} connection The active Dynamics 365 connection object.
-     * @param {string} webResourceId The GUID of the web resource to include in the publish XML.
+     * @param {string[]} webResourceIds The GUIDs of the web resources to include in the publish XML.
      * @returns {Promise<void>} A promise that resolves when the PublishXml action is successful.
      * @throws {Error} If the PublishXml request fails.
      * @private
      */
     private static async publishXML(
         connection: Connection,
-        webResourceId: string
+        webResourceIds: string[]
     ): Promise<void> { 
         const apiVersion = ConfigurationService.getDynamicsAPIVersion();
+        const webResourceXml = webResourceIds
+            .map(webResourceId => `<webresource>{${webResourceId}}</webresource>`)
+            .join("");
         // Construct the ParameterXml required by the PublishXml action.
         const parameters: PublishXmlParams = { 
             ParameterXml:
-                `<importexportxml><webresources><webresource>{${webResourceId}}</webresource></webresources></importexportxml>`,
+                `<importexportxml><webresources>${webResourceXml}</webresources></importexportxml>`,
         };
         const publishQuery = `${API_DATA_V}${apiVersion}/PublishXml`; // The OData action path.
         // PublishXml action might return a specific response or just a success status.

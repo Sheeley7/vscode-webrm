@@ -1,5 +1,15 @@
 # Change Log
 
+## [1.1.9]
+- Updated MSAL to `@azure/msal-node` 5.1.5 and raised the VS Code engine/runtime target for Node 20 support.
+- Removed the `uuid` dependency and now use Node's built-in UUID generation.
+- Added selected-solution tracking and a status bar indicator for the solution used when publishing.
+- Publishing no longer requires opening a web resource from the extension first. The active file is matched to a server web resource by workspace-relative path.
+- If the active file is not in the selected solution, the extension prompts to add it before publishing.
+- If the active file does not exist on the server, the extension prompts to create it, add it to the selected solution, and publish it.
+- Removed `webRM.pullLatestVersionFromServer`. Opening a web resource from the extension now always pulls the server version, while still warning when an existing local file differs from a server version modified by another user.
+- Cleaned up duplicate Cancel buttons in publish confirmation dialogs.
+
 ## [1.1.8]
 - Added a new setting `webRM.pullLatestVersionFromServer` to control whether the latest version of a web resource is pulled from the CRM server when a file is opened.
 - Added a warning that appears if the file on the server was last modified by a different user and the local content is different from the server content.

@@ -2,7 +2,7 @@
   "name": "vscode-webrm",
   "displayName": "vscode-webrm",
   "description": "Web Resource Manager for Dataverse",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "publisher": "sheeley7",
   "icon": "resources/dark/vscode-webrm-logo.png",
   "repository": {
@@ -10,7 +10,7 @@
     "url": "https://github.com/Sheeley7/vscode-webrm.git"
   },
   "engines": {
-    "vscode": "^1.89.0"
+    "vscode": "^1.98.0"
   },
   "categories": [
     "Extension Packs"
@@ -29,7 +29,23 @@
     "PowerAutomate",
     "XRM"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onView:vscode-webrm-loading",
+    "onCommand:wrm.addConnection",
+    "onCommand:wrm.connect",
+    "onCommand:wrm.removeConnection",
+    "onCommand:wrm.getWebResources",
+    "onCommand:wrm.publishWebResource",
+    "onCommand:wrm.pullCurrentFileFromServer",
+    "onCommand:wrm.openWebResource",
+    "onCommand:wrm.addFavoriteSolution",
+    "onCommand:wrm.removeFavoriteSolution",
+    "onCommand:wrm.pushSolutionLocalFiles",
+    "onCommand:wrm.pullSolutionServerFiles",
+    "onCommand:wrm.filterSolutions",
+    "onCommand:wrm.toggleSolutionSortOrder",
+    "onCommand:wrm.copyConnectionUrl"
+  ],
   "main": "dist/extension.js",
   "contributes": {
     "commands": [
@@ -53,9 +69,9 @@
       },
       {
         "command": "wrm.getWebResources",
-        "title": "Get Web Resources",
+        "title": "Link Solution",
         "category": "Web Resource Manager",
-        "icon": "$(cloud-download)"
+        "icon": "$(link)"
       },
       {
         "command": "wrm.publishWebResource",
@@ -64,10 +80,16 @@
         "icon": "$(cloud-upload)"
       },
       {
-        "command": "wrm.openWebResource",
-        "title": "Open",
+        "command": "wrm.pullCurrentFileFromServer",
+        "title": "Dynamics: Pull Current File from Server",
         "category": "Web Resource Manager",
-        "icon": "$(go-to-file)"
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "wrm.openWebResource",
+        "title": "Pull from Server",
+        "category": "Web Resource Manager",
+        "icon": "$(cloud-download)"
       },
       {
         "command": "wrm.addFavoriteSolution",
@@ -80,6 +102,18 @@
         "title": "Remove Favorite",
         "category": "Web Resource Manager",
         "icon": "$(trash)"
+      },
+      {
+        "command": "wrm.pushSolutionLocalFiles",
+        "title": "Push Local Files to Server",
+        "category": "Web Resource Manager",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "wrm.pullSolutionServerFiles",
+        "title": "Replace Local Files with Server",
+        "category": "Web Resource Manager",
+        "icon": "$(cloud-download)"
       },
       {
         "command": "wrm.filterSolutions",
@@ -112,19 +146,28 @@
     "views": {
       "vscode-webresourcemanager": [
         {
+          "id": "vscode-webrm-loading",
+          "name": "Loading",
+          "icon": "$(loading)",
+          "when": "!wrm.viewsReady"
+        },
+        {
           "id": "vscode-connection-explorer",
           "name": "Connection Manager",
-          "icon": "$(plug)"
+          "icon": "$(plug)",
+          "when": "wrm.viewsReady"
         },
         {
           "id": "vscode-solution-explorer",
           "name": "Solutions",
-          "icon": "$(package)"
+          "icon": "$(package)",
+          "when": "wrm.viewsReady"
         },
         {
           "id": "vscode-webresource-explorer",
           "name": "Web Resources",
-          "icon": "$(file-code)"
+          "icon": "$(file-code)",
+          "when": "wrm.viewsReady"
         }
       ]
     },
@@ -133,6 +176,14 @@
         {
           "command": "wrm.publishWebResource",
           "when": "activeEditor"
+        },
+        {
+          "command": "wrm.pushSolutionLocalFiles",
+          "when": "wrm.solutionLinked"
+        },
+        {
+          "command": "wrm.pullSolutionServerFiles",
+          "when": "wrm.solutionLinked"
         }
       ],
       "view/title": [
@@ -153,6 +204,18 @@
           "when": "view == vscode-solution-explorer",
           "group": "navigation@3",
           "icon": "$(filter)"
+        },
+        {
+          "command": "wrm.pushSolutionLocalFiles",
+          "when": "view == vscode-webresource-explorer && wrm.solutionLinked",
+          "group": "navigation@1",
+          "icon": "$(cloud-upload)"
+        },
+        {
+          "command": "wrm.pullSolutionServerFiles",
+          "when": "view == vscode-webresource-explorer && wrm.solutionLinked",
+          "group": "navigation@2",
+          "icon": "$(cloud-download)"
         }
       ],
       "view/item/context": [
@@ -175,7 +238,7 @@
           "command": "wrm.getWebResources",
           "when": "view == vscode-solution-explorer && viewItem == solution",
           "group": "inline",
-          "icon": "$(cloud-download)"
+          "icon": "$(cursor)"
         },
         {
           "command": "wrm.addFavoriteSolution",
@@ -191,10 +254,24 @@
           "command": "wrm.openWebResource",
           "when": "view == vscode-webresource-explorer && viewItem == webresource",
           "group": "inline",
-          "icon": "$(go-to-file)"
+          "icon": "$(cloud-download)"
         }
       ],
-      "editor/context": []
+      "editor/context": [],
+      "editor/title": [
+        {
+          "command": "wrm.publishWebResource",
+          "when": "resourceScheme == file && wrm.viewsReady && wrm.connected && wrm.solutionLinked",
+          "group": "navigation@1",
+          "icon": "$(cloud-upload)"
+        },
+        {
+          "command": "wrm.pullCurrentFileFromServer",
+          "when": "resourceScheme == file && wrm.viewsReady && wrm.connected && wrm.solutionLinked",
+          "group": "navigation@2",
+          "icon": "$(cloud-download)"
+        }
+      ]
     },
     "configuration": {
       "type": "object",
@@ -229,12 +306,6 @@
           "default": "true",
           "description": "Sort solution results in ascending order.",
           "scope": "resource"
-        },
-        "webRM.pullLatestVersionFromServer": {
-          "type": "boolean",
-          "default": true,
-          "description": "Pull latest version from CRM server when opening a web resource file.",
-          "scope": "resource"
         }
       }
     }
@@ -247,8 +318,7 @@
   "devDependencies": {
     "@types/node": "22.x",
     "@types/node-fetch": "^2.6.12",
-    "@types/uuid": "^10.0.0",
-    "@types/vscode": "^1.89.0",
+    "@types/vscode": "^1.98.0",
     "@typescript-eslint/eslint-plugin": "^8.32.1",
     "@typescript-eslint/parser": "^8.32.1",
     "esbuild": "^0.25.4",
@@ -256,8 +326,7 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
-    "@azure/msal-node": "^3.5.3",
-    "node-fetch": "^2.7.0",
-    "uuid": "^11.1.0"
+    "@azure/msal-node": "^5.1.5",
+    "node-fetch": "^2.7.0"
   }
 }
