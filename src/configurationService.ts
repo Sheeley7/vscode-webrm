@@ -15,15 +15,6 @@ export class ConfigurationService {
     }
 
     /**
-     * Gets the 'authWebServiceURL' from the extension settings.
-     * This URL is used for authentication purposes.
-     * @returns {string | undefined} The authentication web service URL, or undefined if not set.
-     */
-    static getAuthWebServiceURL(): string | undefined {
-        return this.getConfiguration().get("authWebServiceURL");
-    }
-
-    /**
      * Gets the 'appClientId' (Application Client ID) from the extension settings.
      * This ID is used for OAuth 2.0 authentication with Azure AD.
      * @returns {string | undefined} The Application Client ID, or undefined if not set.

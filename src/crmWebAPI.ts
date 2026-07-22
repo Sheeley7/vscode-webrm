@@ -1,11 +1,17 @@
 import * as vscode from "vscode";
 import { Connection } from "./views/connectionExplorer";
-import fetch from 'node-fetch';
-import { Response, RequestInit } from 'node-fetch';
 import { Solution } from "./views/solutionExplorer";
 import { WebResource } from "./views/webResourceExplorer";
 import * as path from "path";
 import { ConfigurationService } from "./configurationService";
+import { logError } from "./utils/logger";
+import { encodeODataLiteral, getWebResourceTypeFromName, createBoundary } from "./dataverse/odataUtils";
+import {
+    buildGetBatchBody,
+    buildPatchBatchBody,
+    parseBatchJsonResponses,
+    parseBatchResponseItems,
+} from "./dataverse/batchUtils";
 
 // #region Interfaces for API Payloads and Responses
 /**
@@ -44,6 +50,8 @@ interface WebResourceContent {
     modifiedby: {
         fullname: string;
     };
+    /** OData concurrency token, present because requests set `Prefer: odata.include-annotations="*"`. */
+    "@odata.etag"?: string;
 }
 
 /**
@@ -72,6 +80,8 @@ interface WebResourceBatchDetail extends WebResourceContent {
 interface WebResourceContentUpdate {
     webResourceId: string;
     base64Content: string;
+    /** Optional `@odata.etag` captured at read time, sent as `If-Match` for optimistic concurrency. */
+    etag?: string;
 }
 
 /**
@@ -81,6 +91,19 @@ interface PublishXmlParams {
     ParameterXml: string; // XML string specifying entities to publish.
 }
 // #endregion Interfaces
+
+/** Thrown when a PATCH's `If-Match` precondition fails (HTTP 412): the server record changed since it was read. */
+export class ConcurrencyConflictError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "ConcurrencyConflictError";
+    }
+}
+
+/** Result of a chunked batch content update, distinguishing concurrency conflicts from success. */
+export interface BatchUpdateResult {
+    conflictedWebResourceIds: string[];
+}
 
 // #region OData Constants
 // Constants for OData query construction and headers.
@@ -99,6 +122,9 @@ const ENTITY_MSDYN_SOLUTION_COMPONENT_SUMMARIES = "msdyn_solutioncomponentsummar
 const QUERY_SELECT = "?$select=";
 const QUERY_FILTER = "&$filter=";
 const QUERY_ORDERBY = "&$orderby=";
+
+/** Hard ceiling on pages followed via @odata.nextLink, so a bug or huge org can't spin forever. */
+const MAX_PAGES = 200;
 // #endregion OData Constants
 
 /**
@@ -106,60 +132,25 @@ const QUERY_ORDERBY = "&$orderby=";
  * This class encapsulates data retrieval and modification operations.
  */
 export class CrmWebAPI {
-    private static createBoundary(prefix: string): string {
-        return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    }
-
-    private static escapeODataString(value: string): string {
-        return value.replace(/'/g, "''");
-    }
-
-    private static getWebResourceTypeFromName(webResourceName: string): number {
-        const extension = path.extname(webResourceName).toLowerCase();
-        const typeByExtension: Record<string, number> = {
-            ".html": 1,
-            ".htm": 1,
-            ".css": 2,
-            ".js": 3,
-            ".xml": 4,
-            ".png": 5,
-            ".jpg": 6,
-            ".jpeg": 6,
-            ".gif": 7,
-            ".xap": 8,
-            ".xsl": 9,
-            ".xslt": 9,
-            ".ico": 10,
-            ".svg": 11,
-            ".resx": 12,
-        };
-        const webResourceType = typeByExtension[extension];
-        if (!webResourceType) {
-            throw new Error(`Unsupported web resource file type '${extension || "(none)"}' for '${webResourceName}'.`);
-        }
-        return webResourceType;
-    }
-
     /**
      * Retrieves a list of solutions from the connected Dynamics 365 environment.
      * Filters solutions based on configuration settings (name filter, visibility, managed status).
      *
      * @param {Connection} connection The active Dynamics 365 connection object.
-     * @param {vscode.ExtensionContext} globalContext The VS Code extension context for accessing global state (e.g., favorite solutions).
      * @returns {Promise<Solution[]>} A promise that resolves to an array of Solution objects.
      * @throws {Error} If the API request fails or returns an unexpected response structure.
      */
     static async getSolutions(
-        connection: Connection
-        // globalContext: vscode.ExtensionContext, // Removed globalContext
-    ): Promise<RawSolution[]> { // Return RawSolution[]
+        connection: Connection,
+        cancellationToken?: vscode.CancellationToken
+    ): Promise<RawSolution[]> {
         const apiVersion = ConfigurationService.getDynamicsAPIVersion();
         const solutionFilter = ConfigurationService.getSolutionNameFilter();
         let additionalFilter = "";
-        // Apply solution name filter if configured.
+        // Apply solution name filter if configured. Escaped and URL-encoded since it is
+        // interpolated directly into the query string.
         if (solutionFilter != null && solutionFilter !== "") {
-            additionalFilter =
-                ` and contains(friendlyname, '${solutionFilter}')`;
+            additionalFilter = ` and contains(friendlyname, '${encodeODataLiteral(solutionFilter)}')`;
         }
 
         const sortOrder = ConfigurationService.getSolutionSortAscending()
@@ -167,37 +158,33 @@ export class CrmWebAPI {
             : "desc"; // Descending sort order.
 
         // Construct the OData query for solutions.
-        const solutionQuery = 
+        const solutionQuery =
             `${API_DATA_V}${apiVersion}/${ENTITY_SOLUTIONS}` +
             `${QUERY_SELECT}friendlyname,uniquename,solutionid` +
             `${QUERY_FILTER}ismanaged eq false and isvisible eq true${additionalFilter}` + // Filter for unmanaged, visible solutions.
             `${QUERY_ORDERBY}friendlyname ${sortOrder}`;
 
-        const rawSolutions = await this.getRecords<RawSolution>(connection, solutionQuery);
-        
-        // Logic for creating Solution objects and checking favorites is moved to SolutionExplorer/command handler.
-        return rawSolutions; // Return raw data
+        return this.getRecords<RawSolution>(connection, solutionQuery, cancellationToken);
     }
 
     /**
      * Retrieves the content of a specific web resource.
-     * The content is fetched as a base64 encoded string and set on the provided WebResource object.
      *
      * @param {Connection} connection The active Dynamics 365 connection object.
-     * @param {WebResource} webResource The WebResource object for which to fetch content. Its `webResourceContent` property will be updated.
-     * @returns {Promise<void>} A promise that resolves when the content has been fetched and set.
+     * @param {WebResource} webResource The WebResource object for which to fetch content.
+     * @returns {Promise<WebResourceContent>} A promise that resolves to the web resource's content and metadata.
      * @throws {Error} If the API request fails, the web resource content is not found, or the response is in an unexpected format.
      */
     static async getWebResourceDetails(
         connection: Connection,
-        webResource: WebResource // Input WebResource object, its content property is updated.
+        webResource: WebResource
     ): Promise<WebResourceContent> {
         const apiVersion = ConfigurationService.getDynamicsAPIVersion();
         // Construct OData query to select only the 'content' field of the web resource.
         const contentQuery = `${API_DATA_V}${apiVersion}/${ENTITY_WEBRESOURCE_SET}(${webResource.getWebResourceId()})?$select=content,modifiedon&$expand=modifiedby($select=fullname)`;
-        
+
         const webResourceRecord = await this.getRecord<WebResourceContent>(connection, contentQuery);
-        
+
         // Validate the response and update the webResource object.
         if (webResourceRecord && typeof webResourceRecord.content === 'string') {
             return webResourceRecord;
@@ -215,58 +202,36 @@ export class CrmWebAPI {
      * @returns {Promise<WebResource[]>} A promise that resolves to an array of WebResource objects.
      * @throws {Error} If the API request fails or if there's an issue processing the web resources (e.g., workspace path issues).
      */
-    static async getWebResources(connection: Connection, solution: Solution): Promise<WebResource[]> {
+    static async getWebResources(
+        connection: Connection,
+        solution: Solution,
+        cancellationToken?: vscode.CancellationToken
+    ): Promise<WebResource[]> {
         const apiVersion = ConfigurationService.getDynamicsAPIVersion();
         // OData query for solution component summaries, filtered by solution ID and component type 61 (Web Resource).
-        const wrQuery = 
+        const wrQuery =
             `${API_DATA_V}${apiVersion}/${ENTITY_MSDYN_SOLUTION_COMPONENT_SUMMARIES}` +
             `${QUERY_SELECT}msdyn_name,msdyn_objectid` + // Select name and object ID.
             `${QUERY_FILTER}(msdyn_solutionid eq ${solution.solutionId}) and (msdyn_componenttype eq 61)` +
             `${QUERY_ORDERBY}msdyn_name asc`; // Order by name.
-        
-        const rawWebResources = await this.getRecords<RawWebResource>(connection, wrQuery);
+
+        const rawWebResources = await this.getRecords<RawWebResource>(connection, wrQuery, cancellationToken);
         const webResourceResults: WebResource[] = [];
 
-        try {
-            // Determine base path from workspace folders for constructing local file paths.
-            const workspaceFolders = vscode.workspace.workspaceFolders;
-            if (!workspaceFolders || workspaceFolders.length === 0) {
-                // This case should ideally be handled before calling this function,
-                // but as a safeguard:
-                throw new Error("No workspace folder found. Cannot determine path for web resources.");
-            }
-            const basePath = workspaceFolders[0].uri.fsPath;
-
-            for (const rawWR of rawWebResources) { // Renamed loop variable for clarity
-                // Parse the web resource name to determine file name and potential subfolder structure.
-                const filePathParts = rawWR.msdyn_name.split('/');
-                const fileName = filePathParts[filePathParts.length-1]; // Use length-1 for safety
-                
-                // Note: The original logic for `folderPath` and `fullFilePath` seemed to assume a flat structure
-                // under `basePath`. If `msdyn_name` implies deeper paths, this would need adjustment.
-                // For now, creating a conceptual local path. The actual file creation happens elsewhere.
-                const conceptualFullFilePath = path.join(basePath, fileName); // Using fileName directly under basePath.
-
-                webResourceResults.push(
-                    new WebResource(
-                        rawWR.msdyn_name,       // Full logical name from CRM.
-                        rawWR.msdyn_objectid,   // CRM ID.
-                        fileName,               // Display name (file part).
-                        conceptualFullFilePath, // Conceptual local path.
-                        "",                     // Content - fetched on demand.
-                        "file"                  // Type.
-                    )
-                );
-            }
-            return webResourceResults;
-        } catch (err: unknown) { // Catching unknown for type safety.
-            if (err instanceof Error) {
-                // Re-throw known errors or wrap for more context if needed.
-                throw new Error(`Error processing web resources: ${err.message}`);
-            }
-            // Handle non-Error objects thrown, though this is rare in well-behaved async code.
-            throw new Error(`An unknown error occurred while processing web resources: ${String(err)}`);
+        for (const rawWR of rawWebResources) {
+            const fileName = path.basename(rawWR.msdyn_name.split("/").filter(Boolean).pop() ?? rawWR.msdyn_name);
+            webResourceResults.push(
+                new WebResource(
+                    rawWR.msdyn_name,       // Full logical name from CRM.
+                    rawWR.msdyn_objectid,   // CRM ID.
+                    fileName,               // Display name (file part).
+                    "",                     // Local path is resolved later against the bound workspace folder.
+                    "",                     // Content - fetched on demand.
+                    "file"                  // Type.
+                )
+            );
         }
+        return webResourceResults;
     }
 
     /**
@@ -274,11 +239,10 @@ export class CrmWebAPI {
      */
     static async getWebResourceByName(connection: Connection, webResourceName: string): Promise<ServerWebResource | null> {
         const apiVersion = ConfigurationService.getDynamicsAPIVersion();
-        const escapedName = this.escapeODataString(webResourceName);
         const query =
             `${API_DATA_V}${apiVersion}/${ENTITY_WEBRESOURCE_SET}` +
             `${QUERY_SELECT}webresourceid,name,webresourcetype` +
-            `${QUERY_FILTER}name eq '${escapedName}'&$top=1`;
+            `${QUERY_FILTER}name eq '${encodeODataLiteral(webResourceName)}'&$top=1`;
 
         const results = await this.getRecords<ServerWebResource>(connection, query);
         return results[0] ?? null;
@@ -312,7 +276,7 @@ export class CrmWebAPI {
         base64Content: string
     ): Promise<ServerWebResource> {
         const fileName = path.basename(webResourceName);
-        const webResourceType = this.getWebResourceTypeFromName(webResourceName);
+        const webResourceType = getWebResourceTypeFromName(webResourceName);
         await this.createRecord(
             connection,
             {
@@ -361,14 +325,18 @@ export class CrmWebAPI {
      * @param {Connection} connection The active Dynamics 365 connection object.
      * @param {string} webResourceId The ID of the web resource to publish.
      * @param {string} base64Content The new content of the web resource, base64 encoded.
+     * @param {string} [etag] Optional `@odata.etag` captured at read time; sent as `If-Match` so a concurrent
+     *                        server-side change since the read is rejected instead of silently overwritten.
      * @returns {Promise<void>} A promise that resolves when the web resource is successfully updated and published.
-     * @throws {Error} If any step of the publishing process fails.
+     * @throws {ConcurrencyConflictError} If `etag` no longer matches the server's current version.
+     * @throws {Error} If any other step of the publishing process fails.
      */
     static async publishWebResource(
         connection: Connection,
         webResourceId: string,
-        base64Content: string
-    ): Promise<void> { // Explicitly Promise<void> as it doesn't return a value on success.
+        base64Content: string,
+        etag?: string
+    ): Promise<void> {
         try {
             // Step 1: Update the web resource content.
             const recordToUpdate: UpdateRequest = { content: base64Content };
@@ -376,81 +344,78 @@ export class CrmWebAPI {
                 connection,
                 recordToUpdate,
                 ENTITY_WEBRESOURCE_SET,
-                webResourceId
+                webResourceId,
+                etag
             );
-            
+
             // Step 2: Publish the web resource using PublishXml action.
             await this.publishXML(
                 connection,
                 [webResourceId]
             );
-        } catch (err: unknown) { // Catching unknown for type safety.
-            // Add more context to the error if it's an Error object.
+        } catch (err: unknown) {
+            if (err instanceof ConcurrencyConflictError) {
+                throw err;
+            }
             const message = err instanceof Error ? err.message : String(err);
             throw new Error(`Error publishing web resource (ID: ${webResourceId}): ${message}`);
         }
     }
 
     /**
-     * Updates multiple web resource records in a single non-transactional OData batch request.
+     * Updates multiple web resource records via chunked, non-transactional OData batch requests.
+     * Each update may carry an `etag` for optimistic concurrency; conflicting updates (HTTP 412)
+     * are reported back rather than thrown, so callers can present one consolidated conflict list.
      */
     static async updateWebResourcesBatch(
         connection: Connection,
-        updates: WebResourceContentUpdate[]
-    ): Promise<void> {
+        updates: WebResourceContentUpdate[],
+        batchSize: number = 10
+    ): Promise<BatchUpdateResult> {
+        const conflictedWebResourceIds: string[] = [];
         if (updates.length === 0) {
-            return;
+            return { conflictedWebResourceIds };
         }
 
         const apiVersion = ConfigurationService.getDynamicsAPIVersion();
-        const batchBoundary = this.createBoundary("batch");
-        const crlf = "\r\n";
-        const requestParts: string[] = [];
+        const apiDataPrefix = `${API_DATA_V}${apiVersion}/`;
 
-        for (const update of updates) {
-            requestParts.push(
-                `--${batchBoundary}`,
-                "Content-Type: application/http",
-                "Content-Transfer-Encoding: binary",
-                "",
-                `PATCH ${API_DATA_V}${apiVersion}/${ENTITY_WEBRESOURCE_SET}(${update.webResourceId}) HTTP/1.1`,
-                "Content-Type: application/json; type=entry",
-                "",
-                JSON.stringify({ content: update.base64Content })
+        for (let i = 0; i < updates.length; i += batchSize) {
+            const batchUpdates = updates.slice(i, i + batchSize);
+            const batchBoundary = createBoundary("batch");
+            const batchBody = buildPatchBatchBody(
+                batchBoundary,
+                apiDataPrefix,
+                batchUpdates.map(update => ({
+                    relativeUrl: `${ENTITY_WEBRESOURCE_SET}(${update.webResourceId})`,
+                    body: { content: update.base64Content },
+                    ifMatch: update.etag,
+                }))
             );
+
+            const responseText = await this.makeRawApiRequest(
+                connection,
+                "POST",
+                `${API_DATA_V}${apiVersion}/$batch`,
+                batchBody,
+                `multipart/mixed; boundary="${batchBoundary}"`
+            );
+
+            const items = parseBatchResponseItems(responseText, batchUpdates.length);
+            items.forEach((item, index) => {
+                if (item.status === 412) {
+                    conflictedWebResourceIds.push(batchUpdates[index].webResourceId);
+                } else if (item.status < 200 || item.status >= 300) {
+                    throw new Error(`Batch update returned inner HTTP status ${item.status} for '${batchUpdates[index].webResourceId}': ${responseText}`);
+                }
+            });
         }
 
-        const batchBody = [
-            ...requestParts,
-            `--${batchBoundary}--`,
-            "",
-        ].join(crlf);
-
-        await this.makeRawApiRequest(
-            connection,
-            "POST",
-            `${API_DATA_V}${apiVersion}/$batch`,
-            batchBody,
-            `multipart/mixed; boundary="${batchBoundary}"`,
-            responseText => {
-                const innerStatusMatches = [...responseText.matchAll(/HTTP\/1\.1\s+(\d{3})/g)];
-                if (innerStatusMatches.length !== updates.length) {
-                    throw new Error(`Batch update returned ${innerStatusMatches.length} responses for ${updates.length} updates: ${responseText}`);
-                }
-
-                const failedStatus = innerStatusMatches
-                    .map(match => Number(match[1]))
-                    .find(status => status < 200 || status >= 300);
-
-                if (failedStatus) {
-                    throw new Error(`Batch update returned inner HTTP status ${failedStatus}: ${responseText}`);
-                }
-            }
-        );
+        return { conflictedWebResourceIds };
     }
 
     /**
-     * Retrieves web resource details in non-transactional OData batch GET requests.
+     * Retrieves web resource details in chunked, non-transactional OData batch GET requests.
      */
     static async getWebResourceDetailsBatch(
         connection: Connection,
@@ -463,29 +428,18 @@ export class CrmWebAPI {
         }
 
         const apiVersion = ConfigurationService.getDynamicsAPIVersion();
+        const apiDataPrefix = `${API_DATA_V}${apiVersion}/`;
+
         for (let i = 0; i < webResources.length; i += batchSize) {
             const batchWebResources = webResources.slice(i, i + batchSize);
-            const batchBoundary = this.createBoundary("batch");
-            const crlf = "\r\n";
-            const requestParts: string[] = [];
-
-            for (const webResource of batchWebResources) {
-                requestParts.push(
-                    `--${batchBoundary}`,
-                    "Content-Type: application/http",
-                    "Content-Transfer-Encoding: binary",
-                    "",
-                    `GET ${API_DATA_V}${apiVersion}/${ENTITY_WEBRESOURCE_SET}(${webResource.webResourceId})?$select=content,modifiedon&$expand=modifiedby($select=fullname) HTTP/1.1`,
-                    "Accept: application/json",
-                    "",
-                );
-            }
-
-            const batchBody = [
-                ...requestParts,
-                `--${batchBoundary}--`,
-                "",
-            ].join(crlf);
+            const batchBoundary = createBoundary("batch");
+            const batchBody = buildGetBatchBody(
+                batchBoundary,
+                apiDataPrefix,
+                batchWebResources.map(webResource => ({
+                    relativeUrl: `${ENTITY_WEBRESOURCE_SET}(${webResource.webResourceId})?$select=content,modifiedon&$expand=modifiedby($select=fullname)`,
+                }))
+            );
 
             const responseText = await this.makeRawApiRequest(
                 connection,
@@ -495,7 +449,7 @@ export class CrmWebAPI {
                 `multipart/mixed; boundary="${batchBoundary}"`
             );
 
-            const responsePayloads = this.parseBatchJsonResponses(responseText, batchWebResources.length);
+            const responsePayloads = parseBatchJsonResponses(responseText, batchWebResources.length);
             responsePayloads.forEach((payload, index) => {
                 const webResource = batchWebResources[index];
                 const webResourceDetails = payload as Partial<WebResourceContent>;
@@ -527,96 +481,84 @@ export class CrmWebAPI {
 
     /**
      * Makes a generic API request to Dynamics 365.
-     * This is a private helper method that handles common request setup, execution, and error processing.
-     *
-     * @template TResponsePayload The expected type of the response payload.
-     * @template TRequestPayload The type of the request payload (for POST/PATCH). Defaults to `void` if no payload.
-     * @param {Connection} connection The active Dynamics 365 connection object.
-     * @param {string} method The HTTP method (e.g., "GET", "POST", "PATCH").
-     * @param {string} apiQuery The OData query string or API path (appended to connection URL).
-     * @param {TRequestPayload} [jsonPayload] The JSON payload for POST or PATCH requests.
-     * @returns {Promise<TResponsePayload>} A promise that resolves with the response payload.
-     * @throws {Error} If the request fails, returns a non-successful status code, or if response parsing fails.
      * @private
      */
-    private static async makeApiRequest<TResponsePayload, TRequestPayload = void>( // Added default type for TRequestPayload
+    private static async makeApiRequest<TResponsePayload, TRequestPayload = void>(
         connection: Connection,
         method: string,
-        apiQuery: string, // Renamed 'select' to 'apiQuery' for clarity as it's more than just $select
-        jsonPayload?: TRequestPayload 
+        apiQuery: string,
+        jsonPayload?: TRequestPayload,
+        extraHeaders?: Record<string, string>
     ): Promise<TResponsePayload> {
-        // Wrap the existing Promise logic in an async IIFE to use await for connection.connect()
-        return (async () => {
-            try {
-                // Ensure the connection is active and token is valid/renewed before making the API call.
-                await connection.connect(); 
-            } catch (error: unknown) {
-                // If connection.connect() fails (e.g., authProvider.login() fails),
-                // it should throw an error. We need to propagate this.
-                console.error("Token renewal/validation failed prior to API request in makeApiRequest:", error);
-                const message = error instanceof Error ? error.message : String(error);
-                // Reject the promise that makeApiRequest returns
-                throw new Error(`Connection validation/token renewal failed: ${message}`);
+        try {
+            // Ensure the connection is active and token is valid/renewed before making the API call.
+            await connection.connect();
+        } catch (error: unknown) {
+            logError("CrmWebAPI.makeApiRequest (token renewal)", error);
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`Connection validation/token renewal failed: ${message}`);
+        }
+
+        try {
+            const accessToken = connection.getAccessToken();
+            if (!accessToken) {
+                throw new Error("No access token available for API request. Please connect first.");
             }
 
-            // New Promise logic using node-fetch
-            try {
-                const accessToken = connection.getAccessToken();
-                if (!accessToken) {
-                    // This case should ideally be prevented by connection.connect() throwing an error.
-                    throw new Error("No access token available for API request. Please connect first.");
-                }
+            const headers: Record<string, string> = {
+                "OData-MaxVersion": ODATA_MAX_VERSION,
+                "OData-Version": ODATA_VERSION,
+                "Accept": "application/json",
+                "Content-Type": APPLICATION_JSON_CHARSET_UTF8,
+                "Prefer": ODATA_INCLUDE_ANNOTATIONS,
+                "Authorization": "Bearer " + accessToken,
+                ...extraHeaders,
+            };
 
-                const headers: { [key: string]: string } = { // node-fetch headers can be a plain object
-                    "OData-MaxVersion": ODATA_MAX_VERSION,
-                    "OData-Version": ODATA_VERSION,
-                    "Accept": "application/json",
-                    "Content-Type": APPLICATION_JSON_CHARSET_UTF8,
-                    "Prefer": ODATA_INCLUDE_ANNOTATIONS,
-                    "Authorization": "Bearer " + accessToken,
-                };
+            const options: RequestInit = {
+                method: method,
+                headers: headers,
+            };
 
-                const options: RequestInit = {
-                    method: method,
-                    headers: headers,
-                };
-
-                if (jsonPayload) {
-                    options.body = JSON.stringify(jsonPayload);
-                }
-
-                const res: Response = await fetch(connection.getConnectionURL() + apiQuery, options);
-
-                if (res.ok) {
-                    // For PATCH (typically 204 No Content) or explicit 204, resolve with undefined as TResponsePayload
-                    if (method.toUpperCase() === "PATCH" || res.status === 204) {
-                        return undefined as unknown as TResponsePayload;
-                    }
-                    // For other success cases, parse JSON
-                    return await res.json() as TResponsePayload;
-                } else {
-                    // Handle non-successful HTTP status codes.
-                    let errorDetails = `Status Text: ${res.statusText}`;
-                    try {
-                        // Try to parse error details from response body if available
-                        const errorBody = await res.json(); // Or res.text() if not always JSON
-                        errorDetails = (errorBody as any)?.error?.message || JSON.stringify(errorBody);
-                    } catch (e) {
-                        // If parsing error body fails, use status text or fallback
-                        console.warn("Failed to parse error body from API response:", e);
-                        // errorDetails is already set to statusText, can append more if needed
-                        const textBody = await res.text(); // get text as fallback
-                        errorDetails = textBody || errorDetails;
-
-                    }
-                    throw new Error(`API request to '${apiQuery}' completed with status ${res.status}: ${errorDetails}`);
-                }
-            } catch (err: unknown) {
-                const message = err instanceof Error ? err.message : String(err);
-                // Ensure the promise from the IIFE is rejected
-                throw new Error(`API request failed: ${message}`);
+            if (jsonPayload) {
+                options.body = JSON.stringify(jsonPayload);
             }
-        })(); // Immediately invoke the async IIFE
+
+            const requestUrl = apiQuery.startsWith("http")
+                ? apiQuery
+                : connection.getConnectionURL() + apiQuery;
+            const res: Response = await fetch(requestUrl, options);
+
+            if (res.ok) {
+                if (method.toUpperCase() === "PATCH" || res.status === 204) {
+                    return undefined as unknown as TResponsePayload;
+                }
+                return await res.json() as TResponsePayload;
+            }
+
+            if (res.status === 412) {
+                throw new ConcurrencyConflictError(
+                    `The record at '${apiQuery}' was changed on the server since it was last read.`
+                );
+            }
+
+            let errorDetails = `Status Text: ${res.statusText}`;
+            try {
+                const errorBody = await res.json();
+                errorDetails = (errorBody as any)?.error?.message || JSON.stringify(errorBody);
+            } catch (e) {
+                console.warn("Failed to parse error body from API response:", e);
+                const textBody = await res.text();
+                errorDetails = textBody || errorDetails;
+            }
+            throw new Error(`API request to '${apiQuery}' completed with status ${res.status}: ${errorDetails}`);
+        } catch (err: unknown) {
+            if (err instanceof ConcurrencyConflictError) {
+                throw err;
+            }
+            const message = err instanceof Error ? err.message : String(err);
+            throw new Error(`API request failed: ${message}`);
+        }
     }
 
     private static async makeRawApiRequest(
@@ -624,8 +566,7 @@ export class CrmWebAPI {
         method: string,
         apiQuery: string,
         body: string,
-        contentType: string,
-        validateResponseText?: (responseText: string) => void
+        contentType: string
     ): Promise<string> {
         await connection.connect();
 
@@ -634,7 +575,7 @@ export class CrmWebAPI {
             throw new Error("No access token available for API request. Please connect first.");
         }
 
-        const headers: { [key: string]: string } = {
+        const headers: Record<string, string> = {
             "OData-MaxVersion": ODATA_MAX_VERSION,
             "OData-Version": ODATA_VERSION,
             "Accept": "application/json",
@@ -653,71 +594,54 @@ export class CrmWebAPI {
             throw new Error(`API request to '${apiQuery}' completed with status ${res.status}: ${responseText || res.statusText}`);
         }
 
-        validateResponseText?.(responseText);
         return responseText;
     }
 
-    private static parseBatchJsonResponses(responseText: string, expectedCount: number): unknown[] {
-        const responseSections = responseText.split(/--batchresponse_[^\r\n]+/g);
-        const payloads: unknown[] = [];
-
-        for (const section of responseSections) {
-            const statusMatch = section.match(/HTTP\/1\.1\s+(\d{3})/);
-            if (!statusMatch) {
-                continue;
-            }
-
-            const status = Number(statusMatch[1]);
-            if (status < 200 || status >= 300) {
-                throw new Error(`Batch retrieval returned inner HTTP status ${status}: ${section}`);
-            }
-
-            const jsonStart = section.indexOf("{");
-            const jsonEnd = section.lastIndexOf("}");
-            if (jsonStart === -1 || jsonEnd === -1 || jsonEnd < jsonStart) {
-                throw new Error(`Batch retrieval response did not include a JSON payload: ${section}`);
-            }
-
-            payloads.push(JSON.parse(section.slice(jsonStart, jsonEnd + 1)));
-        }
-
-        if (payloads.length !== expectedCount) {
-            throw new Error(`Batch retrieval returned ${payloads.length} responses for ${expectedCount} requests: ${responseText}`);
-        }
-
-        return payloads;
-    }
-
     /**
-     * Retrieves multiple records from a Dynamics 365 entity set.
-     * Expects the response to be an OData collection with a 'value' property containing an array of records.
-     *
-     * @template T The expected type of individual items in the 'value' array.
-     * @param {Connection} connection The active Dynamics 365 connection object.
-     * @param {string} odataQuery The OData query string.
-     * @returns {Promise<T[]>} A promise that resolves to an array of records of type T.
-     * @throws {Error} If the API response does not match the expected OData collection structure.
+     * Retrieves multiple records from a Dynamics 365 entity set, following
+     * `@odata.nextLink` until the collection is exhausted (bounded by `MAX_PAGES`
+     * as a safety limit) so large solutions/resource sets are not silently truncated.
      * @private
      */
-    private static async getRecords<T>(connection: Connection, odataQuery: string): Promise<T[]> {
-        // Defines the expected structure of an OData collection response.
-        type ODataCollectionResponse<U> = { value: U[] };
-        // Make the API request, expecting the ODataCollectionResponse structure.
-        const result = await this.makeApiRequest<ODataCollectionResponse<T>, void>(connection, "GET", odataQuery);
-        // Validate that the response has a 'value' property which is an array.
-        if (result && Array.isArray(result.value)) {
-            return result.value;
+    private static async getRecords<T>(
+        connection: Connection,
+        odataQuery: string,
+        cancellationToken?: vscode.CancellationToken
+    ): Promise<T[]> {
+        type ODataCollectionResponse<U> = { value: U[]; "@odata.nextLink"?: string };
+
+        const allRecords: T[] = [];
+        let nextUrl: string | undefined = odataQuery;
+        let pages = 0;
+
+        while (nextUrl) {
+            if (cancellationToken?.isCancellationRequested) {
+                return allRecords;
+            }
+
+            const result: ODataCollectionResponse<T> = await this.makeApiRequest<ODataCollectionResponse<T>, void>(
+                connection,
+                "GET",
+                nextUrl
+            );
+            if (!result || !Array.isArray(result.value)) {
+                throw new Error(`Unexpected response structure for getRecords from '${odataQuery}': 'value' property missing or not an array.`);
+            }
+            allRecords.push(...result.value);
+
+            nextUrl = result["@odata.nextLink"];
+            pages++;
+            if (nextUrl && pages >= MAX_PAGES) {
+                console.warn(`getRecords stopped after ${MAX_PAGES} pages for query '${odataQuery}'; results may be incomplete.`);
+                break;
+            }
         }
-        throw new Error(`Unexpected response structure for getRecords from '${odataQuery}': 'value' property missing or not an array.`);
+
+        return allRecords;
     }
-    
+
     /**
      * Retrieves a single record from Dynamics 365.
-     *
-     * @template T The expected type of the record being fetched.
-     * @param {Connection} connection The active Dynamics 365 connection object.
-     * @param {string} odataQuery The OData query string for a single record.
-     * @returns {Promise<T>} A promise that resolves to a single record of type T.
      * @private
      */
     private static async getRecord<T>(connection: Connection, odataQuery: string): Promise<T> {
@@ -726,31 +650,24 @@ export class CrmWebAPI {
 
     /**
      * Updates an existing record in Dynamics 365 using a PATCH request.
-     *
-     * @param {Connection} connection The active Dynamics 365 connection object.
-     * @param {UpdateRequest} record The record data to update. Should conform to the UpdateRequest interface.
-     * @param {string} entityName The logical name of the entity to update.
-     * @param {string} recordId The GUID of the record to update.
-     * @returns {Promise<void>} A promise that resolves when the update is successful.
-     *                         Typically, a successful PATCH returns a 204 No Content response.
-     * @throws {Error} If the update request fails.
      * @private
      */
     private static async updateRecord(
         connection: Connection,
-        record: UpdateRequest, 
+        record: UpdateRequest,
         entityName: string,
-        recordId: string
-    ): Promise<void> { 
+        recordId: string,
+        etag?: string
+    ): Promise<void> {
         const apiVersion = ConfigurationService.getDynamicsAPIVersion();
         const updateQuery = `${API_DATA_V}${apiVersion}/${entityName}(${recordId})`;
-        // PATCH requests typically return 204 No Content, so TResponsePayload is void.
-        await this.makeApiRequest<void, UpdateRequest>(connection, "PATCH", updateQuery, record);
-        // Success is implied if no error is thrown.
+        const extraHeaders = etag ? { "If-Match": etag } : undefined;
+        await this.makeApiRequest<void, UpdateRequest>(connection, "PATCH", updateQuery, record, extraHeaders);
     }
 
     /**
      * Creates a record in Dynamics 365 using a POST request.
+     * @private
      */
     private static async createRecord(
         connection: Connection,
@@ -764,30 +681,21 @@ export class CrmWebAPI {
 
     /**
      * Publishes XML changes to Dynamics 365. Used for publishing web resources.
-     *
-     * @param {Connection} connection The active Dynamics 365 connection object.
-     * @param {string[]} webResourceIds The GUIDs of the web resources to include in the publish XML.
-     * @returns {Promise<void>} A promise that resolves when the PublishXml action is successful.
-     * @throws {Error} If the PublishXml request fails.
      * @private
      */
     private static async publishXML(
         connection: Connection,
         webResourceIds: string[]
-    ): Promise<void> { 
+    ): Promise<void> {
         const apiVersion = ConfigurationService.getDynamicsAPIVersion();
         const webResourceXml = webResourceIds
             .map(webResourceId => `<webresource>{${webResourceId}}</webresource>`)
             .join("");
-        // Construct the ParameterXml required by the PublishXml action.
-        const parameters: PublishXmlParams = { 
+        const parameters: PublishXmlParams = {
             ParameterXml:
                 `<importexportxml><webresources>${webResourceXml}</webresources></importexportxml>`,
         };
-        const publishQuery = `${API_DATA_V}${apiVersion}/PublishXml`; // The OData action path.
-        // PublishXml action might return a specific response or just a success status.
-        // Using PublishXmlResponse allows for defining a specific structure if needed.
+        const publishQuery = `${API_DATA_V}${apiVersion}/PublishXml`;
         await this.makeApiRequest<PublishXmlResponse, PublishXmlParams>(connection, "POST", publishQuery, parameters);
-        // Success is implied if no error is thrown.
     }
 }

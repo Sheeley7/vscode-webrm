@@ -3,65 +3,99 @@ import { ConnectionExplorer, Connection } from "./views/connectionExplorer";
 import { SolutionExplorer, Solution } from "./views/solutionExplorer";
 import { WebResourceExplorer, WebResource } from "./views/webResourceExplorer";
 import { ConnectionStatusController } from "./connectionStatusController";
-import { CrmWebAPI } from "./crmWebAPI";
+import { CrmWebAPI, ConcurrencyConflictError } from "./crmWebAPI";
 import * as fs from "fs";
 import * as path from "path";
 import { ConfigurationService } from "./configurationService";
-import { resetAllFileSyncState, setFileSyncState, computeFileHash } from "./extension";
+import { FileSyncStateService } from "./state/fileSyncStateService";
+import { generateNonce } from "./utils/nonce";
+import { logError } from "./utils/logger";
+import {
+    resolveWebResourcePath,
+    toWebResourceName,
+    UnsafeWebResourceNameError,
+} from "./workspace/workspaceMapper";
 
 /**
- * Prepares the local file system path for a web resource, creating necessary directories.
- * @param {string} webResourceName The full logical name of the web resource (e.g., "new_scripts/myfolder/myscript.js").
- * @returns {Promise<string | undefined>} The normalized local file path, or undefined if path preparation fails (e.g., no workspace).
- * @async
+ * Prompts the user to choose a workspace folder when more than one is open,
+ * auto-selects the only folder otherwise. Used so a linked solution is bound
+ * to one specific folder instead of implicitly assuming `workspaceFolders[0]`.
  */
-async function prepareWebResourceFilePath(webResourceName: string): Promise<string | undefined> {
-    // Ensure a workspace folder is open
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders || workspaceFolders.length === 0) {
-        vscode.window.showErrorMessage("No workspace folder is open. Please open a folder to download web resources.");
+async function chooseWorkspaceFolderForSolution(solutionName: string): Promise<vscode.WorkspaceFolder | undefined> {
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length === 0) {
+        vscode.window.showErrorMessage("No workspace folder is open. Please open a folder before linking a solution.");
         return undefined;
     }
-    // Use the path of the first workspace folder as the root for saving web resources
-    const rootPath = workspaceFolders[0].uri.fsPath;
-
-    // Web resources in CRM use '/' as a path separator. Split to get individual parts.
-    const filePathParts = webResourceName.split('/'); 
-    const fileName = filePathParts.pop(); // The last part is the file name
-
-    // Validate that a file name exists
-    if (!fileName) {
-        vscode.window.showErrorMessage(`Invalid web resource name (missing file name part): ${webResourceName}`);
-        return undefined;
+    if (folders.length === 1) {
+        return folders[0];
     }
-
-    // Construct the target folder path using platform-specific separators
-    const targetFolderPath = path.join(rootPath, ...filePathParts);
-
-    try {
-        // Create the target directory structure recursively.
-        // This will create all necessary parent directories.
-        // It does not throw an error if the directory already exists.
-        await fs.promises.mkdir(targetFolderPath, { recursive: true });
-    } catch (error: unknown) {
-        // Handle potential errors during directory creation
-        const message = error instanceof Error ? error.message : String(error);
-        vscode.window.showErrorMessage(`Failed to create directory '${targetFolderPath}': ${message}`);
-        return undefined; 
-    }
-
-    // Construct the full file path and normalize it
-    const fullFilePath = path.join(targetFolderPath, fileName);
-    return path.normalize(fullFilePath);
+    const picked = await vscode.window.showQuickPick(
+        folders.map(folder => ({ label: folder.name, description: folder.uri.fsPath, folder })),
+        { placeHolder: `Choose the workspace folder to use for solution '${solutionName}'`, ignoreFocusOut: true }
+    );
+    return picked?.folder;
 }
 
-function getLocalFilePathForWebResourceName(webResourceName: string): string | undefined {
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders || workspaceFolders.length === 0) {
+/** Returns the workspace folder bound to the linked solution, resolving/binding one if needed. */
+async function resolveBoundWorkspaceFolder(
+    solutionExplorer: SolutionExplorer,
+    solutionName: string
+): Promise<vscode.WorkspaceFolder | undefined> {
+    const bound = solutionExplorer.getBoundWorkspaceFolder();
+    if (bound) {
+        return bound;
+    }
+    const chosen = await chooseWorkspaceFolderForSolution(solutionName);
+    if (chosen) {
+        solutionExplorer.setBoundWorkspaceFolder(chosen);
+    }
+    return chosen;
+}
+
+/** Bound folder if a solution is linked, otherwise the sole/first open workspace folder. */
+function getBoundOrSingleWorkspaceFolder(solutionExplorer: SolutionExplorer): vscode.WorkspaceFolder | undefined {
+    return solutionExplorer.getBoundWorkspaceFolder() ?? vscode.workspace.workspaceFolders?.[0];
+}
+
+/**
+ * Resolves a web resource's logical name to a local path under `workspaceFolder`,
+ * creating parent directories. Rejects names that would escape the workspace root.
+ */
+async function prepareWebResourceFilePath(
+    webResourceName: string,
+    workspaceFolder: vscode.WorkspaceFolder
+): Promise<string | undefined> {
+    let fullFilePath: string;
+    try {
+        fullFilePath = resolveWebResourcePath(workspaceFolder.uri.fsPath, webResourceName);
+    } catch (error: unknown) {
+        const message = error instanceof UnsafeWebResourceNameError ? error.message : String(error);
+        vscode.window.showErrorMessage(`Cannot map web resource '${webResourceName}' to a local path: ${message}`);
         return undefined;
     }
 
-    return path.normalize(path.join(workspaceFolders[0].uri.fsPath, ...webResourceName.split("/")));
+    try {
+        await fs.promises.mkdir(path.dirname(fullFilePath), { recursive: true });
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        vscode.window.showErrorMessage(`Failed to create directory for '${webResourceName}': ${message}`);
+        return undefined;
+    }
+
+    return fullFilePath;
+}
+
+function getLocalFilePathForWebResourceName(
+    webResourceName: string,
+    workspaceFolder: vscode.WorkspaceFolder
+): string | undefined {
+    try {
+        return resolveWebResourcePath(workspaceFolder.uri.fsPath, webResourceName);
+    } catch (error: unknown) {
+        logError("workspaceMapper.resolveWebResourcePath", error);
+        return undefined;
+    }
 }
 
 function getWebResourceNameFromDocument(document: vscode.TextDocument): { filePath: string; webResourceName?: string } {
@@ -76,28 +110,17 @@ function getWebResourceNameFromDocument(document: vscode.TextDocument): { filePa
         return { filePath };
     }
 
-    const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri)
-        ?? workspaceFolders
-            .map(folder => ({
-                folder,
-                relativePath: path.relative(folder.uri.fsPath, filePath),
-            }))
-            .filter(candidate => candidate.relativePath && !candidate.relativePath.startsWith("..") && !path.isAbsolute(candidate.relativePath))
-            .sort((a, b) => a.relativePath.length - b.relativePath.length)[0]?.folder;
-
-    if (!workspaceFolder) {
-        return { filePath };
+    const directFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+    if (directFolder) {
+        return { filePath, webResourceName: toWebResourceName(directFolder.uri.fsPath, filePath) };
     }
 
-    const relativePath = path.relative(workspaceFolder.uri.fsPath, filePath);
-    if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
-        return { filePath };
-    }
+    const candidates = workspaceFolders
+        .map(folder => toWebResourceName(folder.uri.fsPath, filePath))
+        .filter((name): name is string => !!name)
+        .sort((a, b) => a.length - b.length);
 
-    return {
-        filePath,
-        webResourceName: relativePath.split(path.sep).join("/"),
-    };
+    return { filePath, webResourceName: candidates[0] };
 }
 
 async function readFileBase64IfExists(filePath: string): Promise<string | undefined> {
@@ -128,17 +151,17 @@ function resolveSolutionArgument(solutionArg: unknown, solutionExplorer: Solutio
     return solutionExplorer.getSelectedSolution();
 }
 
-async function confirmPublishIfModifiedByOtherUser(
+/**
+ * Fetches the server's current copy of a web resource before publishing, both to warn when
+ * another user last changed it and to capture the `@odata.etag` used as `If-Match` so a
+ * concurrent server-side change since the read is rejected (412) instead of silently overwritten.
+ */
+async function checkServerStateBeforePublish(
     connection: Connection,
     webResourceName: string,
     webResourceId: string,
     localPath: string
-): Promise<boolean> {
-    const currentUser = connection.getConnectionUserName();
-    if (!currentUser) {
-        return true;
-    }
-
+): Promise<{ shouldContinue: boolean; etag?: string }> {
     const webResource = new WebResource(
         webResourceName,
         webResourceId,
@@ -148,10 +171,12 @@ async function confirmPublishIfModifiedByOtherUser(
         "file"
     );
     const serverDetails = await CrmWebAPI.getWebResourceDetails(connection, webResource);
-    const lastModifiedBy = serverDetails.modifiedby?.fullname;
+    const etag = serverDetails["@odata.etag"];
 
-    if (!lastModifiedBy || lastModifiedBy === currentUser) {
-        return true;
+    const currentUser = connection.getConnectionUserName();
+    const lastModifiedBy = serverDetails.modifiedby?.fullname;
+    if (!currentUser || !lastModifiedBy || lastModifiedBy === currentUser) {
+        return { shouldContinue: true, etag };
     }
 
     const lastModifiedOn = new Date(serverDetails.modifiedon).toLocaleString();
@@ -161,7 +186,7 @@ async function confirmPublishIfModifiedByOtherUser(
         "Continue Publish"
     );
 
-    return continueChoice === "Continue Publish";
+    return { shouldContinue: continueChoice === "Continue Publish", etag };
 }
 
 /**
@@ -173,13 +198,15 @@ async function confirmPublishIfModifiedByOtherUser(
  * @param {SolutionExplorer} solutionExplorer Instance of the SolutionExplorer view.
  * @param {WebResourceExplorer} webResourceExplorer Instance of the WebResourceExplorer view.
  * @param {ConnectionStatusController} connectionStatusController Instance of the ConnectionStatusController.
+ * @param {FileSyncStateService} fileSyncStateService Owns file publish/sync state and the file status bar.
  */
 export function registerCommands(
     context: vscode.ExtensionContext,
     connectionExplorer: ConnectionExplorer,
     solutionExplorer: SolutionExplorer,
     webResourceExplorer: WebResourceExplorer,
-    connectionStatusController: ConnectionStatusController
+    connectionStatusController: ConnectionStatusController,
+    fileSyncStateService: FileSyncStateService
 ): void {
     /**
      * Command: Add a new Dynamics 365 connection.
@@ -188,76 +215,68 @@ export function registerCommands(
     const wrmAddConnection = vscode.commands.registerCommand(
         "wrm.addConnection",
         async () => {
-            // Determine the column to show the webview in
             const column = vscode.window.activeTextEditor
                 ? vscode.window.activeTextEditor.viewColumn
                 : undefined;
 
-            // Create and show a new webview panel
             const panel = vscode.window.createWebviewPanel(
-                'addCrmConnection', // Identifies the type of the webview. Used internally.
-                'Add New CRM Connection', // Title of the panel displayed to the user.
-                column || vscode.ViewColumn.One, // Editor column to show the new webview panel in.
+                'addCrmConnection',
+                'Add New CRM Connection',
+                column || vscode.ViewColumn.One,
                 {
-                    enableScripts: true, // Enable JavaScript in the webview.
-                    // Restrict the webview to only loading content from our extension's directory.
-                    // localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'src', 'webviews')] 
-                    // For a single HTML file with inline CSS/JS, context.extensionUri is a broad but acceptable root.
-                    localResourceRoots: [context.extensionUri] 
+                    enableScripts: true,
+                    localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'webviews')],
                 }
             );
 
-            // Get the path to the HTML file on disk
-            // Now webviews/ is at the root of the extension, not in src/
             const htmlFilePath = vscode.Uri.joinPath(context.extensionUri, 'webviews', 'newConnectionForm.html');
-            
+
             try {
-                // Read the HTML content from the file
+                const nonce = generateNonce();
                 let htmlContent = fs.readFileSync(htmlFilePath.fsPath, 'utf8');
-                
-                // Replace placeholders for CSP source with the correct webview URI
-                // This is crucial for Content Security Policy when loading resources in the webview.
-                // Note: The placeholder ${webview.cspSource} was in the HTML; here we replace it.
-                // However, a more robust way is to use `panel.webview.asWebviewUri` for *each* resource if they were separate files.
-                // Since CSS and JS are inline in this HTML, the primary concern is script execution enabled by `enableScripts: true`
-                // and the `Content-Security-Policy` meta tag in the HTML itself.
-                // The provided HTML already contains: <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${webview.cspSource}; script-src 'unsafe-inline' ${webview.cspSource};">
-                // So, we need to replace ${webview.cspSource} with panel.webview.cspSource
-                htmlContent = htmlContent.replace(/\$\{webview.cspSource\}/g, panel.webview.cspSource);
-                
+                htmlContent = htmlContent
+                    .replace(/\$\{webview.cspSource\}/g, panel.webview.cspSource)
+                    .replace(/\$\{nonce\}/g, nonce);
                 panel.webview.html = htmlContent;
 
-                // Handle messages from the webview (form submission, cancellation)
-                // This will be detailed in the next subtask.
                 panel.webview.onDidReceiveMessage(
                     async message => {
-                        switch (message.command) {
-                            case 'saveConnection':
+                        switch (message?.command) {
+                            case 'saveConnection': {
                                 try {
-                                    // Remove trailing slash from URL if present
-                                    let url = message.data.url;
+                                    const data = message.data;
+                                    if (
+                                        typeof data !== 'object' || data === null ||
+                                        typeof data.name !== 'string' || typeof data.url !== 'string'
+                                    ) {
+                                        panel.webview.postMessage({ command: 'showError', text: 'Invalid connection details received.' });
+                                        return;
+                                    }
+
+                                    const name = data.name.trim();
+                                    let url = data.url.trim();
+                                    if (!name || !url) {
+                                        panel.webview.postMessage({ command: 'showError', text: 'Connection name and URL are required.' });
+                                        return;
+                                    }
                                     if (url.endsWith("/") || url.endsWith("\\")) {
                                         url = url.slice(0, -1);
                                     }
 
-                                    const addConnectionResult = await connectionExplorer.addItem(
-                                        message.data.name,
-                                        url
-                                    );
+                                    const addConnectionResult = await connectionExplorer.addItem(name, url);
                                     if (addConnectionResult) {
-                                        panel.dispose(); // Close the webview panel on success
+                                        panel.dispose();
                                     } else {
-                                        // Send error back to webview
                                         panel.webview.postMessage({ command: 'showError', text: 'Failed to add connection. A connection with this name might already exist or the details are invalid.' });
                                     }
                                 } catch (error: unknown) {
                                     const errorMsg = error instanceof Error ? error.message : String(error);
-                                    // Send error back to webview
                                     panel.webview.postMessage({ command: 'showError', text: `Failed to add connection: ${errorMsg}` });
                                 }
                                 return;
+                            }
                             case 'cancelConnectionForm':
-                                panel.dispose(); // Close the webview panel
+                                panel.dispose();
                                 return;
                         }
                     },
@@ -265,22 +284,12 @@ export function registerCommands(
                     context.subscriptions
                 );
 
-                // Handle panel disposal (e.g., when user closes it)
-                panel.onDidDispose(
-                    () => {
-                        // Clean up resources or state if needed
-                        console.log("Add Connection webview panel disposed.");
-                    },
-                    null,
-                    context.subscriptions
-                );
-
             } catch (err: unknown) {
                 const errorMsg = err instanceof Error ? err.message : String(err);
-                console.error("Error setting up webview for Add Connection:", errorMsg);
+                logError("wrm.addConnection (webview setup)", err);
                 vscode.window.showErrorMessage(`Failed to open Add Connection form: ${errorMsg}`);
-                panel.dispose(); // Clean up panel if HTML load or setup fails
-                return; 
+                panel.dispose();
+                return;
             }
         }
     );
@@ -300,7 +309,6 @@ export function registerCommands(
                 }
                 await connectionExplorer.removeItem(connection);
                 const currentCrmConnection = connectionStatusController.getCurrentConnection();
-                // If the removed connection was the active one, update UI and disconnect
                 if (
                     currentCrmConnection?.getConnectionId() === connection.getConnectionId()
                 ) {
@@ -309,7 +317,7 @@ export function registerCommands(
                     connectionStatusController.disconnect();
                     await vscode.commands.executeCommand("setContext", "wrm.connected", false);
                     await vscode.commands.executeCommand("setContext", "wrm.solutionLinked", false);
-                    resetAllFileSyncState();
+                    fileSyncStateService.resetAll();
                 }
                 vscode.window.showInformationMessage(`Connection '${connection.label}' removed successfully.`);
             } catch (error: unknown) {
@@ -331,62 +339,69 @@ export function registerCommands(
                 vscode.window.showErrorMessage("No connection selected to connect. Please select a connection from the explorer.");
                 return;
             }
+            let wasCancelled = false;
             try {
                 await vscode.window.withProgress(
                     {
                         location: vscode.ProgressLocation.Notification,
                         title: `Connecting to '${connection.label}'...`,
-                        cancellable: true, // Allow user to cancel the connection attempt
+                        cancellable: true,
                     },
                     async (progress, token) => {
                         token.onCancellationRequested(() => {
+                            wasCancelled = true;
                             vscode.window.showInformationMessage("Connection process cancelled by user.");
                         });
 
-                        if (token.isCancellationRequested) return;
+                        if (token.isCancellationRequested) { wasCancelled = true; return; }
 
                         connectionStatusController.setCurrentConnection(connection);
-                        webResourceExplorer.clearWebResources(); // Clear web resources when connection changes
-                        
+                        webResourceExplorer.clearWebResources();
+
                         progress.report({ increment: 20, message: "Authenticating..." });
-                        await connectionStatusController.connect(); // Handles authentication
+                        await connectionStatusController.connect();
+                        if (token.isCancellationRequested) { wasCancelled = true; return; }
+
                         await vscode.commands.executeCommand("setContext", "wrm.connected", true);
-                        resetAllFileSyncState();
+                        fileSyncStateService.resetAll();
 
-                        if (token.isCancellationRequested) return;
                         progress.report({ increment: 50, message: "Getting Solutions..." });
+                        const rawSolutions = await CrmWebAPI.getSolutions(connection, token);
+                        if (token.isCancellationRequested) { wasCancelled = true; return; }
 
-                        // Fetch raw solutions data from CRM
-                        const rawSolutions = await CrmWebAPI.getSolutions(connection);
-
-                        if (token.isCancellationRequested) return;
-
-                        // Get favorite solutions from global state
                         const favoriteSolutions = context.globalState.get<Record<string, boolean>>(
                             "favoriteSolutions",
-                            {} 
+                            {}
                         );
 
-                        // Map RawSolution[] to Solution[], incorporating favorite status
-                        const solutionViewModels = rawSolutions.map(rawSol => 
+                        const solutionViewModels = rawSolutions.map(rawSol =>
                             new Solution(
-                                rawSol, 
+                                rawSol,
                                 favoriteSolutions[rawSol.solutionid] === true,
-                                solutionExplorer // Pass SolutionExplorer instance
+                                solutionExplorer
                             )
                         );
-                        
-                        if (token.isCancellationRequested) return;
-                        // Update solution explorer view
+
+                        if (token.isCancellationRequested) { wasCancelled = true; return; }
                         solutionExplorer.setSolutions(solutionViewModels);
-                        // solutionExplorer.refresh(); // setSolutions now calls refresh
-                        progress.report({ increment: 100, message: `Successfully connected to '${connection.label}'.`});
+                        progress.report({ increment: 100, message: `Successfully connected to '${connection.label}'.` });
                     }
                 );
-            } catch (error: unknown) { 
+
+                if (wasCancelled) {
+                    // Ensure a cancelled connect never leaves half-applied state (e.g. connected
+                    // context set but no solutions loaded).
+                    solutionExplorer.clearSolutions();
+                    webResourceExplorer.clearWebResources();
+                    connectionStatusController.disconnect();
+                    await vscode.commands.executeCommand("setContext", "wrm.connected", false);
+                    await vscode.commands.executeCommand("setContext", "wrm.solutionLinked", false);
+                    fileSyncStateService.resetAll();
+                }
+            } catch (error: unknown) {
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(`Failed to connect to '${connection.label}': ${message}`);
-                connectionStatusController.disconnect(); // Ensure disconnected state on failure
+                connectionStatusController.disconnect();
                 await vscode.commands.executeCommand("setContext", "wrm.connected", false);
                 await vscode.commands.executeCommand("setContext", "wrm.solutionLinked", false);
             }
@@ -401,11 +416,18 @@ export function registerCommands(
     const wrmGetWebResources = vscode.commands.registerCommand(
         "wrm.getWebResources",
         async (solution: Solution) => {
-            if (!solution || !solution.solutionId) { // Check for solution and its ID
+            if (!solution || !solution.solutionId) {
                 vscode.window.showErrorMessage("No solution selected or invalid solution. Please select a solution from the explorer.");
                 return;
             }
+
+            const workspaceFolder = await chooseWorkspaceFolderForSolution(solution.getFriendlyName());
+            if (!workspaceFolder) {
+                return;
+            }
+
             solutionExplorer.setSelectedSolution(solution);
+            solutionExplorer.setBoundWorkspaceFolder(workspaceFolder);
             try {
                 await vscode.window.withProgress(
                     {
@@ -425,19 +447,19 @@ export function registerCommands(
                             vscode.window.showErrorMessage("No active connection. Please connect first to get web resources.");
                             return;
                         }
-                        
+
                         progress.report({ increment: 30, message: "Fetching from CRM..." });
                         const webResources = await CrmWebAPI.getWebResources(
                             currentCrmConnection,
-                            solution
+                            solution,
+                            token
                         );
 
                         if (token.isCancellationRequested) return;
                         progress.report({ increment: 70, message: "Populating explorer..." });
-                        // Update web resource explorer view
                         webResourceExplorer.setWebResources(webResources);
                         webResourceExplorer.refresh();
-                        progress.report({ increment: 100, message: `Web resources for '${solution.label}' loaded.`});
+                        progress.report({ increment: 100, message: `Web resources for '${solution.label}' loaded.` });
                     }
                 );
             } catch (error: unknown) {
@@ -460,8 +482,7 @@ export function registerCommands(
                 return;
             }
             try {
-                await solution.setFavorite(); // No longer needs context, calls SolutionExplorer method
-                // solutionExplorer.refresh(); // Refresh is now handled by setFavorite potentially through SolutionExplorer
+                await solution.setFavorite();
             } catch (error: unknown) {
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(
@@ -484,8 +505,7 @@ export function registerCommands(
                 return;
             }
             try {
-                await solution.removeFavorite(); // No longer needs context
-                // solutionExplorer.refresh(); // Refresh is now handled by removeFavorite potentially through SolutionExplorer
+                await solution.removeFavorite();
             } catch (error: unknown) {
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(
@@ -512,7 +532,12 @@ export function registerCommands(
             }
 
             const solutionName = solution.getFriendlyName();
-            const candidates: Array<{ webResource: WebResource; localPath: string; base64Content: string }> = [];
+            const workspaceFolder = await resolveBoundWorkspaceFolder(solutionExplorer, solutionName);
+            if (!workspaceFolder) {
+                return;
+            }
+
+            const candidates: Array<{ webResource: WebResource; localPath: string; base64Content: string; etag?: string }> = [];
             let wasCancelled = false;
 
             try {
@@ -531,7 +556,7 @@ export function registerCommands(
                         await connection.connect();
                         if (token.isCancellationRequested) return;
 
-                        const webResources = await CrmWebAPI.getWebResources(connection, solution);
+                        const webResources = await CrmWebAPI.getWebResources(connection, solution, token);
                         const serverDetailsById = await CrmWebAPI.getWebResourceDetailsBatch(connection, webResources, 10);
                         const total = webResources.length || 1;
 
@@ -539,9 +564,10 @@ export function registerCommands(
                             if (token.isCancellationRequested) return;
 
                             const webResource = webResources[i];
-                            const localPath = getLocalFilePathForWebResourceName(webResource.webResourceName);
+                            const localPath = getLocalFilePathForWebResourceName(webResource.webResourceName, workspaceFolder);
                             if (!localPath) {
-                                throw new Error("No workspace folder is open. Please open a folder before pushing local files.");
+                                progress.report({ increment: 50 / total });
+                                continue;
                             }
 
                             const localContentBase64 = await readFileBase64IfExists(localPath);
@@ -559,6 +585,7 @@ export function registerCommands(
                                     webResource,
                                     localPath,
                                     base64Content: localContentBase64,
+                                    etag: serverDetails["@odata.etag"],
                                 });
                             }
 
@@ -587,6 +614,8 @@ export function registerCommands(
                     return;
                 }
 
+                let conflictedIds = new Set<string>();
+
                 await vscode.window.withProgress(
                     {
                         location: vscode.ProgressLocation.Notification,
@@ -603,13 +632,15 @@ export function registerCommands(
                             return;
                         }
 
-                        await CrmWebAPI.updateWebResourcesBatch(
+                        const result = await CrmWebAPI.updateWebResourcesBatch(
                             connection,
                             candidates.map(candidate => ({
                                 webResourceId: candidate.webResource.webResourceId,
                                 base64Content: candidate.base64Content,
+                                etag: candidate.etag,
                             }))
                         );
+                        conflictedIds = new Set(result.conflictedWebResourceIds);
                         progress.report({ increment: 75 });
 
                         if (token.isCancellationRequested) {
@@ -617,15 +648,19 @@ export function registerCommands(
                             return;
                         }
 
-                        await CrmWebAPI.publishWebResources(
-                            connection,
-                            candidates.map(candidate => candidate.webResource.webResourceId)
-                        );
+                        const succeeded = candidates.filter(candidate => !conflictedIds.has(candidate.webResource.webResourceId));
+                        if (succeeded.length > 0) {
+                            await CrmWebAPI.publishWebResources(
+                                connection,
+                                succeeded.map(candidate => candidate.webResource.webResourceId)
+                            );
+                        }
                         progress.report({ increment: 25 });
 
-                        for (const candidate of candidates) {
+                        for (const candidate of succeeded) {
+                            const hash = FileSyncStateService.computeFileHash(Buffer.from(candidate.base64Content, "base64"));
                             connectionStatusController.addSyncedWebResource(candidate.localPath, candidate.webResource.webResourceId);
-                            setFileSyncState(candidate.localPath, candidate.webResource.webResourceId, true);
+                            fileSyncStateService.setFileSyncState(candidate.localPath, candidate.webResource.webResourceId, true, hash);
                         }
                     }
                 );
@@ -634,7 +669,18 @@ export function registerCommands(
                     return;
                 }
 
-                vscode.window.showInformationMessage(`Pushed ${candidates.length} web resource${candidates.length === 1 ? "" : "s"} to Dynamics for solution '${solutionName}'.`);
+                const succeededCount = candidates.length - conflictedIds.size;
+                vscode.window.showInformationMessage(`Pushed ${succeededCount} web resource${succeededCount === 1 ? "" : "s"} to Dynamics for solution '${solutionName}'.`);
+
+                if (conflictedIds.size > 0) {
+                    const conflictedNames = candidates
+                        .filter(candidate => conflictedIds.has(candidate.webResource.webResourceId))
+                        .map(candidate => candidate.webResource.webResourceName)
+                        .join(", ");
+                    vscode.window.showWarningMessage(
+                        `${conflictedIds.size} web resource${conflictedIds.size === 1 ? "" : "s"} changed on the server since being read and were NOT pushed: ${conflictedNames}. Pull the latest server version before retrying.`
+                    );
+                }
             } catch (error: unknown) {
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(`Failed to push local files for solution '${solutionName}': ${message}`);
@@ -659,6 +705,11 @@ export function registerCommands(
             }
 
             const solutionName = solution.getFriendlyName();
+            const workspaceFolder = await resolveBoundWorkspaceFolder(solutionExplorer, solutionName);
+            if (!workspaceFolder) {
+                return;
+            }
+
             const candidates: Array<{ webResource: WebResource; localPath: string; serverContent: string }> = [];
             let wasCancelled = false;
 
@@ -678,7 +729,7 @@ export function registerCommands(
                         await connection.connect();
                         if (token.isCancellationRequested) return;
 
-                        const webResources = await CrmWebAPI.getWebResources(connection, solution);
+                        const webResources = await CrmWebAPI.getWebResources(connection, solution, token);
                         const serverDetailsById = await CrmWebAPI.getWebResourceDetailsBatch(connection, webResources, 10);
                         const total = webResources.length || 1;
 
@@ -686,7 +737,7 @@ export function registerCommands(
                             if (token.isCancellationRequested) return;
 
                             const webResource = webResources[i];
-                            const localPath = await prepareWebResourceFilePath(webResource.webResourceName);
+                            const localPath = await prepareWebResourceFilePath(webResource.webResourceName, workspaceFolder);
                             if (!localPath) {
                                 throw new Error(`Could not prepare local path for '${webResource.webResourceName}'.`);
                             }
@@ -751,8 +802,9 @@ export function registerCommands(
                                 candidate.serverContent,
                                 { encoding: "base64" }
                             );
+                            const hash = FileSyncStateService.computeFileHash(Buffer.from(candidate.serverContent, "base64"));
                             connectionStatusController.addSyncedWebResource(candidate.localPath, candidate.webResource.webResourceId);
-                            setFileSyncState(candidate.localPath, candidate.webResource.webResourceId, true);
+                            fileSyncStateService.setFileSyncState(candidate.localPath, candidate.webResource.webResourceId, true, hash);
                             progress.report({ increment: 100 / total });
                         }
                     }
@@ -783,10 +835,15 @@ export function registerCommands(
                 return;
             }
             try {
-                const fullFilePath = await prepareWebResourceFilePath(webResource.webResourceName);
-                if (!fullFilePath) { 
-                    // Error message already shown in prepareWebResourceFilePath
-                    return; 
+                const workspaceFolder = getBoundOrSingleWorkspaceFolder(solutionExplorer);
+                if (!workspaceFolder) {
+                    vscode.window.showErrorMessage("No workspace folder is open. Please open a folder to download web resources.");
+                    return;
+                }
+
+                const fullFilePath = await prepareWebResourceFilePath(webResource.webResourceName, workspaceFolder);
+                if (!fullFilePath) {
+                    return;
                 }
 
                 const currentCrmConnection = connectionStatusController.getCurrentConnection();
@@ -795,7 +852,6 @@ export function registerCommands(
                     return;
                 }
 
-                // Always fetch web resource content from CRM for comparison
                 const webResourceDetails = await CrmWebAPI.getWebResourceDetails(currentCrmConnection, webResource);
                 if (webResourceDetails.content === undefined) {
                     vscode.window.showErrorMessage(`Failed to retrieve content for web resource: ${webResource.webResourceName}`);
@@ -810,8 +866,6 @@ export function registerCommands(
                     localFileExists = true;
                 } catch (error: any) {
                     if (error.code !== 'ENOENT') {
-                        // ENOENT is fine, means the file doesn't exist locally yet.
-                        // Other errors should be logged.
                         console.error(`Error reading local file: ${error.message}`);
                     }
                 }
@@ -834,32 +888,19 @@ export function registerCommands(
                 await fs.promises.writeFile(
                     fullFilePath,
                     webResourceDetails.content,
-                    { encoding: "base64" } // Assuming content is base64 encoded
+                    { encoding: "base64" }
                 );
-                
-                // Open the local file in VS Code editor
+
                 const doc = await vscode.workspace.openTextDocument(fullFilePath);
                 await vscode.window.showTextDocument(doc);
 
-                // Track the synced web resource for publishing
                 connectionStatusController.addSyncedWebResource(
                     fullFilePath,
                     webResource.webResourceId
                 );
 
-                // --- Add file sync status bar update ---
-                // Set the file as synced (published = true by default on open)
-                try {
-                    const ext = require('./extension');
-                    if (ext && typeof ext.setFileSyncState === 'function' && typeof ext.computeFileHash === 'function') {
-                        // Read file content as text (after writing base64 decoded content)
-                        const fileContent = await fs.promises.readFile(fullFilePath, 'utf8');
-                        const hash = ext.computeFileHash(fileContent);
-                        ext.setFileSyncState(fullFilePath, webResource.webResourceId, true, hash);
-                    }
-                } catch (e) {
-                    // fallback: do nothing if import fails
-                }
+                const hash = FileSyncStateService.computeFileHash(Buffer.from(webResourceDetails.content, "base64"));
+                fileSyncStateService.setFileSyncState(fullFilePath, webResource.webResourceId, true, hash);
             } catch (error: unknown) {
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(`Failed to open web resource '${webResource.webResourceName}': ${message}`);
@@ -951,9 +992,8 @@ export function registerCommands(
                             { encoding: "base64" }
                         );
                         connectionStatusController.addSyncedWebResource(currentPath, serverWebResource.webresourceid);
-                        const fileContent = await fs.promises.readFile(currentPath, "utf8");
-                        const hash = computeFileHash(fileContent);
-                        setFileSyncState(currentPath, serverWebResource.webresourceid, true, hash);
+                        const hash = FileSyncStateService.computeFileHash(Buffer.from(serverDetails.content, "base64"));
+                        fileSyncStateService.setFileSyncState(currentPath, serverWebResource.webresourceid, true, hash);
 
                         const doc = await vscode.workspace.openTextDocument(currentPath);
                         await vscode.window.showTextDocument(doc);
@@ -981,12 +1021,11 @@ export function registerCommands(
                     return;
                 }
                 const document = activeEditor.document;
-                const fileName = document.fileName; // Full local path of the active file
-                const baseName = path.basename(fileName); // File name part for messages
+                const fileName = document.fileName;
+                const baseName = path.basename(fileName);
                 const { filePath: currentPath, webResourceName } = getWebResourceNameFromDocument(document);
                 const progressName = webResourceName ?? baseName;
 
-                // Prompt to save if dirty
                 if (document.isDirty) {
                     const saveChoice = await vscode.window.showWarningMessage(
                         `'${progressName}' has unsaved changes. Save before publishing?`,
@@ -1020,9 +1059,9 @@ export function registerCommands(
                             );
                             return;
                         }
-                        
+
                         progress.report({ increment: 10 });
-                        await connection.connect(); // Ensure connection is active and token is valid
+                        await connection.connect();
 
                         if (token.isCancellationRequested) return;
                         progress.report({ increment: 30 });
@@ -1044,12 +1083,14 @@ export function registerCommands(
 
                         const data = await fs.promises.readFile(currentPath);
                         if (token.isCancellationRequested) return;
-                        const base64 = data.toString("base64"); // Convert file content to base64
+                        const base64 = data.toString("base64");
 
                         progress.report({ increment: 45 });
 
                         let webResourceId = connectionStatusController.getResourceIdFromPath(currentPath);
                         let addedToSelectedSolution = false;
+                        let etagForUpdate: string | undefined;
+
                         if (typeof webResourceId === "undefined") {
                             const serverWebResource = await CrmWebAPI.getWebResourceByName(connection, webResourceName);
                             webResourceId = serverWebResource?.webresourceid;
@@ -1088,7 +1129,7 @@ export function registerCommands(
                         }
 
                         if (!addedToSelectedSolution) {
-                            const shouldContinue = await confirmPublishIfModifiedByOtherUser(
+                            const { shouldContinue, etag } = await checkServerStateBeforePublish(
                                 connection,
                                 webResourceName,
                                 webResourceId,
@@ -1098,6 +1139,7 @@ export function registerCommands(
                                 vscode.window.showInformationMessage("Publish cancelled by user.");
                                 return;
                             }
+                            etagForUpdate = etag;
                         }
 
                         if (token.isCancellationRequested) return;
@@ -1137,17 +1179,22 @@ export function registerCommands(
                         await CrmWebAPI.publishWebResource(
                             connection,
                             webResourceId,
-                            base64
+                            base64,
+                            etagForUpdate
                         );
                         progress.report({ increment: 100 });
 
-                        // Update the status bar to 'Published' and update hash
-                        const fileContent = await fs.promises.readFile(fileName, 'utf8');
-                        const hash = computeFileHash(fileContent);
-                        setFileSyncState(fileName, webResourceId, true, hash);
+                        const hash = FileSyncStateService.computeFileHash(data);
+                        fileSyncStateService.setFileSyncState(fileName, webResourceId, true, hash);
                     }
                 );
             } catch (error: unknown) {
+                if (error instanceof ConcurrencyConflictError) {
+                    vscode.window.showWarningMessage(
+                        `Publish stopped: the server version changed since it was last read. Pull the latest version and try again. (${error.message})`
+                    );
+                    return;
+                }
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(`Failed to publish web resource: ${message}`);
             }
@@ -1191,14 +1238,14 @@ export function registerCommands(
                         },
                         async (progress) => {
                             progress.report({ increment: 20, message: "Connecting..." });
-                            await currentCrmConnection.connect(); // Ensure token is valid
+                            await currentCrmConnection.connect();
 
                             progress.report({ increment: 50, message: "Fetching filtered solutions..." });
                             const rawSolutions = await CrmWebAPI.getSolutions(currentCrmConnection);
-                            
+
                             progress.report({ increment: 80, message: "Updating view..." });
-                            solutionExplorer.setSolutionsFromRaw(rawSolutions); // This will also call refresh
-                            
+                            solutionExplorer.setSolutionsFromRaw(rawSolutions);
+
                             progress.report({ increment: 100, message: "Filter applied." });
                         }
                     );
@@ -1217,13 +1264,11 @@ export function registerCommands(
                 const currentSortAscending = ConfigurationService.getSolutionSortAscending();
                 const newSortAscending = !currentSortAscending;
                 await ConfigurationService.updateSetting(
-                    "solutionSortAscending", 
-                    newSortAscending, 
+                    "solutionSortAscending",
+                    newSortAscending,
                     vscode.ConfigurationTarget.Workspace
                 );
-                // The SolutionExplorer.getChildren method already reads this setting, 
-                // so we just need to refresh the view.
-                solutionExplorer.refresh(); 
+                solutionExplorer.refresh();
             } catch (error: unknown) {
                 const message = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(`Error toggling solution sort order: ${message}`);

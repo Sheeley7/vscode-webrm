@@ -29,23 +29,6 @@
     "PowerAutomate",
     "XRM"
   ],
-  "activationEvents": [
-    "onView:vscode-webrm-loading",
-    "onCommand:wrm.addConnection",
-    "onCommand:wrm.connect",
-    "onCommand:wrm.removeConnection",
-    "onCommand:wrm.getWebResources",
-    "onCommand:wrm.publishWebResource",
-    "onCommand:wrm.pullCurrentFileFromServer",
-    "onCommand:wrm.openWebResource",
-    "onCommand:wrm.addFavoriteSolution",
-    "onCommand:wrm.removeFavoriteSolution",
-    "onCommand:wrm.pushSolutionLocalFiles",
-    "onCommand:wrm.pullSolutionServerFiles",
-    "onCommand:wrm.filterSolutions",
-    "onCommand:wrm.toggleSolutionSortOrder",
-    "onCommand:wrm.copyConnectionUrl"
-  ],
   "main": "dist/extension.js",
   "contributes": {
     "commands": [
@@ -279,7 +262,7 @@
       "properties": {
         "webRM.dynamicsAPIVersion": {
           "type": "string",
-          "default": "9.1",
+          "default": "9.2",
           "description": "API Version for Dynamics 365 Web API",
           "scope": "resource"
         },
@@ -303,7 +286,7 @@
         },
         "webRM.solutionSortAscending": {
           "type": "boolean",
-          "default": "true",
+          "default": true,
           "description": "Sort solution results in ascending order.",
           "scope": "resource"
         }
@@ -312,12 +295,13 @@
   },
   "scripts": {
     "watch": "esbuild --config=esbuild.config.js --watch",
-    "lint": "eslint src --ext ts",
-    "build": "node esbuild.config.js"
+    "lint": "eslint src",
+    "build": "node esbuild.config.js",
+    "pretest": "node scripts/build-tests.js",
+    "test": "node --test \"test-out/**/*.test.js\""
   },
   "devDependencies": {
     "@types/node": "22.x",
-    "@types/node-fetch": "^2.6.12",
     "@types/vscode": "^1.98.0",
     "@typescript-eslint/eslint-plugin": "^8.32.1",
     "@typescript-eslint/parser": "^8.32.1",
@@ -326,7 +310,6 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
-    "@azure/msal-node": "^5.1.5",
-    "node-fetch": "^2.7.0"
+    "@azure/msal-node": "^5.1.5"
   }
 }

@@ -17,6 +17,12 @@ interface RawSolution {
 export class SolutionExplorer implements vscode.TreeDataProvider<Solution> {
     private solutions: Solution[] = [];
     private selectedSolution?: Solution;
+    /**
+     * The workspace folder a linked solution is bound to. Bulk sync operations
+     * and path mapping use this folder consistently instead of always assuming
+     * `workspaceFolders[0]`, so multi-root workspaces behave predictably.
+     */
+    private boundWorkspaceFolder?: vscode.WorkspaceFolder;
     private _onDidChangeTreeData: vscode.EventEmitter<Solution | undefined | null | void> = new vscode.EventEmitter<Solution | undefined | null | void>();
     private _onDidChangeSelectedSolution: vscode.EventEmitter<Solution | undefined> = new vscode.EventEmitter<Solution | undefined>();
     readonly onDidChangeTreeData: vscode.Event<Solution | undefined | null | void> = this._onDidChangeTreeData.event;
@@ -108,6 +114,9 @@ export class SolutionExplorer implements vscode.TreeDataProvider<Solution> {
             return;
         }
         this.selectedSolution = solution;
+        if (!solution) {
+            this.boundWorkspaceFolder = undefined;
+        }
         this._onDidChangeSelectedSolution.fire(solution);
     }
 
@@ -116,6 +125,19 @@ export class SolutionExplorer implements vscode.TreeDataProvider<Solution> {
      */
     public getSelectedSolution(): Solution | undefined {
         return this.selectedSolution;
+    }
+
+    /**
+     * Binds the currently linked solution to a specific workspace folder, so
+     * every file-mapping/sync operation for that solution uses the same root.
+     * Cleared automatically whenever the selected solution changes.
+     */
+    public setBoundWorkspaceFolder(folder: vscode.WorkspaceFolder | undefined): void {
+        this.boundWorkspaceFolder = folder;
+    }
+
+    public getBoundWorkspaceFolder(): vscode.WorkspaceFolder | undefined {
+        return this.boundWorkspaceFolder;
     }
 
 

@@ -9,9 +9,10 @@ import {
   AuthorizationCodeRequest, 
 } from "@azure/msal-node";
 
-import { ConfigurationService } from "./../configurationService"; 
+import { ConfigurationService } from "./../configurationService";
 import * as vscode from "vscode";
 import { SUCCESS_TEMPLATE_HTML, ERROR_TEMPLATE_HTML } from "./authTemplates";
+import { logError } from "../utils/logger";
 
 /**
  * Options for an interactive token request.
@@ -199,7 +200,7 @@ export class AuthProvider {
       await this.persistCache();
       return authResponse;
     } catch (error: unknown) {
-      console.error("Login failed in AuthProvider:", error);
+      logError("AuthProvider.login", error);
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`Authentication failed: ${message}`);
     }
@@ -262,7 +263,7 @@ export class AuthProvider {
         await this.persistCache();
         return result;
       }
-      console.error("Silent token acquisition error (not InteractionRequiredAuthError):", error);
+      logError("AuthProvider.acquireTokenSilent", error);
       throw error;
     }
   }
@@ -293,7 +294,7 @@ export class AuthProvider {
       return authResponse;
     } catch (error: unknown) {
       // Log interactive errors and re-throw to be handled by the calling login() method.
-      console.error("Interactive token acquisition error:", error);
+      logError("AuthProvider.acquireTokenInteractive", error);
       throw error; 
     }
   }

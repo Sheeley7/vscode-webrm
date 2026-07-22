@@ -1,24 +1,19 @@
 import * as vscode from "vscode";
-import { ConnectionExplorer, Connection } from "./views/connectionExplorer";
+import { ConnectionExplorer } from "./views/connectionExplorer";
 import { SolutionExplorer, Solution } from "./views/solutionExplorer";
 import { WebResourceExplorer } from "./views/webResourceExplorer";
 import { ConnectionStatusController } from "./connectionStatusController";
 import { registerCommands } from "./commandHandlers";
 import { checkClientId, checkAPIVersion } from "./utils/configUtils";
+import { FileSyncStateService } from "./state/fileSyncStateService";
+import { generateNonce } from "./utils/nonce";
+import { initLogger } from "./utils/logger";
 import * as fs from 'fs';
-import * as path from 'path';
-import * as crypto from 'crypto';
 
-/**
- * The status bar item instance used by the extension.
- * Exported for potential external use if needed, but primarily managed internally.
- * @type {vscode.StatusBarItem}
- */
-let statusBar: vscode.StatusBarItem; 
+let statusBar: vscode.StatusBarItem;
 let fileStatusBar: vscode.StatusBarItem;
 let solutionStatusBar: vscode.StatusBarItem;
-// Map to track file sync and publish state: { [filePath: string]: { guid: string, published: boolean, hash?: string } }
-const fileSyncState: Map<string, { guid: string, published: boolean, hash?: string }> = new Map();
+let fileSyncStateService: FileSyncStateService;
 
 class LoadingTreeDataProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
     private readonly loadingItem = new vscode.TreeItem("Loading Web Resource Manager...", vscode.TreeItemCollapsibleState.None);
@@ -36,7 +31,7 @@ class LoadingTreeDataProvider implements vscode.TreeDataProvider<vscode.TreeItem
  * Performs initial configuration and workspace checks essential for the extension's operation.
  * This includes verifying required settings (Client ID, API Version, Config Folder) and ensuring a workspace is open.
  *
- * @returns {string} Returns a string code indicating the outcome: 
+ * @returns {string} Returns a string code indicating the outcome:
  *                   "CRITICAL_SETTINGS_MISSING", "WORKSPACE_MISSING", or "ALL_CHECKS_PASSED".
  */
 function performInitialChecks(): { status: string; missing: string[] } {
@@ -63,21 +58,14 @@ function performInitialChecks(): { status: string; missing: string[] } {
     return { status: "ALL_CHECKS_PASSED", missing: [] };
 }
 
-/**
- * Initializes the Visual Studio Code status bar item for the extension.
- * The status bar item displays the current connection status.
- */
 function initializeStatusBar(): void {
-    // Create the status bar item, aligned to the left, with a default priority.
     statusBar = vscode.window.createStatusBarItem(
         vscode.StatusBarAlignment.Left,
-        100 // A common priority for status bar items.
+        100
     );
-    statusBar.text = "Not Connected"; // Initial text.
+    statusBar.text = "Not Connected";
     statusBar.tooltip = "Dynamics 365 Web Resource Manager: Connection Status";
-    // Command to be executed when the status bar item is clicked (optional).
-    // statusBar.command = "wrm.showConnectionManager"; // Example: if you add a command to manage connections.
-    statusBar.show(); // Make the status bar item visible.
+    statusBar.show();
 }
 
 function initializeFileStatusBar(): void {
@@ -94,88 +82,16 @@ function initializeSolutionStatusBar(): void {
     solutionStatusBar.show();
 }
 
-function updateSolutionStatusBar(solution?: Solution): void {
+function updateSolutionStatusBar(solution?: Solution, workspaceFolder?: vscode.WorkspaceFolder): void {
     if (solution) {
         solutionStatusBar.text = `Solution: ${solution.getFriendlyName()}`;
-        solutionStatusBar.tooltip = `Selected Dynamics solution: ${solution.getFriendlyName()} (${solution.solutionUniqueName})`;
+        const folderSuffix = workspaceFolder ? ` — ${workspaceFolder.name}` : "";
+        solutionStatusBar.tooltip = `Selected Dynamics solution: ${solution.getFriendlyName()} (${solution.solutionUniqueName})${folderSuffix}`;
     } else {
         solutionStatusBar.text = "Solution: None";
         solutionStatusBar.tooltip = "Select a Dynamics solution before publishing files that are not already linked.";
     }
     solutionStatusBar.show();
-}
-
-function updateFileStatusBar(editor?: vscode.TextEditor) {
-    const activeEditor = editor || vscode.window.activeTextEditor;
-    if (!activeEditor) {
-        fileStatusBar.hide();
-        return;
-    }
-    const filePath = activeEditor.document.uri.fsPath;
-    const state = fileSyncState.get(filePath);
-    if (state) {
-        let text = state.published ? '$(cloud-upload) Published' : '$(sync-ignored) Not Published';
-        fileStatusBar.text = text;
-        fileStatusBar.show();
-    } else {
-        fileStatusBar.text = 'File: Not Synced';
-        fileStatusBar.show();
-    }
-}
-
-function computeFileHash(content: string): string {
-    return crypto.createHash('sha256').update(content, 'utf8').digest('hex');
-}
-
-function setFileSyncState(filePath: string, guid: string, published: boolean, hash?: string) {
-    // If published is true, update hash
-    const prev = fileSyncState.get(filePath);
-    if (published) {
-        fileSyncState.set(filePath, { guid, published: true, hash });
-    } else if (prev) {
-        fileSyncState.set(filePath, { guid, published: false, hash: prev.hash });
-    } else {
-        fileSyncState.set(filePath, { guid, published: false, hash });
-    }
-    updateFileStatusBar();
-}
-
-function updateFilePublishStateOnSave(filePath: string) {
-    // On save, check if the file matches the last published hash
-    const state = fileSyncState.get(filePath);
-    if (!state) return;
-    const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === filePath);
-    if (!doc) {
-        state.published = false;
-        fileSyncState.set(filePath, state);
-        updateFileStatusBar();
-        return;
-    }
-    const currentHash = computeFileHash(doc.getText());
-    state.published = !!state.hash && currentHash === state.hash;
-    fileSyncState.set(filePath, state);
-    updateFileStatusBar();
-}
-
-// Reset all file sync state (used when connection changes)
-function resetAllFileSyncState() {
-    fileSyncState.clear();
-    updateFileStatusBar();
-}
-
-// Listen for active editor changes and document saves only (not on every text change)
-function registerFileStatusListeners(context: vscode.ExtensionContext) {
-    // We only listen for onDidSaveTextDocument to optimize performance and avoid unnecessary hash computations.
-    // The status bar is updated on save, not on every text change.
-    context.subscriptions.push(
-        vscode.window.onDidChangeActiveTextEditor(updateFileStatusBar),
-        vscode.workspace.onDidSaveTextDocument(e => {
-            const filePath = e.fileName;
-            if (fileSyncState.has(filePath)) {
-                updateFilePublishStateOnSave(filePath);
-            }
-        })
-    );
 }
 
 /**
@@ -197,27 +113,22 @@ function registerTreeDataProviders(
         "vscode-webrm-loading",
         new LoadingTreeDataProvider()
     );
-    // Register the ConnectionExplorer for the 'vscode-connection-explorer' view.
     const connectionTreeView = vscode.window.registerTreeDataProvider(
-        "vscode-connection-explorer", // Matches the view ID in package.json
+        "vscode-connection-explorer",
         connectionExplorer
     );
-    // Register the SolutionExplorer for the 'vscode-solution-explorer' view.
     const solutionTreeView = vscode.window.createTreeView(
-        "vscode-solution-explorer", // Matches the view ID in package.json
+        "vscode-solution-explorer",
         { treeDataProvider: solutionExplorer }
     );
     const solutionSelectionListener = solutionTreeView.onDidChangeSelection(event => {
         solutionExplorer.setSelectedSolution(event.selection[0]);
     });
-    // Register the WebResourceExplorer for the 'vscode-webresource-explorer' view.
     const webResourceTreeView = vscode.window.registerTreeDataProvider(
-        "vscode-webresource-explorer", // Matches the view ID in package.json
+        "vscode-webresource-explorer",
         webResourceExplorer
     );
 
-    // Add the tree view registrations to the extension's subscriptions
-    // to ensure they are disposed of when the extension is deactivated.
     context.subscriptions.push(loadingTreeView, connectionTreeView, solutionTreeView, solutionSelectionListener, webResourceTreeView);
 }
 
@@ -233,52 +144,68 @@ async function showSettingsForm(
 ): Promise<'SAVED' | 'CANCELLED'> {
     return new Promise((resolve) => {
         const panel = vscode.window.createWebviewPanel(
-            'webRMSettingsForm', // Identifies the type of the webview.
-            'Web Resource Manager Settings', // Title of the panel.
-            vscode.ViewColumn.One, // Editor column to show the new webview panel in.
+            'webRMSettingsForm',
+            'Web Resource Manager Settings',
+            vscode.ViewColumn.One,
             {
                 enableScripts: true,
                 localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'webviews')],
-                retainContextWhenHidden: true // Keep state when tab is not visible
+                retainContextWhenHidden: true
             }
         );
 
+        const nonce = generateNonce();
         const htmlPath = vscode.Uri.joinPath(context.extensionUri, 'webviews', 'settingsForm.html');
         let htmlContent = fs.readFileSync(htmlPath.fsPath, 'utf8');
-        htmlContent = htmlContent.replace(/\$\{webview.cspSource\}/g, panel.webview.cspSource);
+        htmlContent = htmlContent
+            .replace(/\$\{webview.cspSource\}/g, panel.webview.cspSource)
+            .replace(/\$\{nonce\}/g, nonce);
         panel.webview.html = htmlContent;
 
-        // Send current settings to the webview to pre-fill the form
         panel.webview.postMessage({ command: 'loadSettings', settings: currentSettings });
 
         panel.onDidDispose(() => {
-            resolve('CANCELLED'); // Resolve as cancelled if panel is closed by user
+            resolve('CANCELLED');
         });
+
+        const settingsToUpdate = [
+            'appClientId', 'appTenantId',
+            'dynamicsAPIVersion', 'solutionNameFilter', 'solutionSortAscending'
+        ] as const;
 
         panel.webview.onDidReceiveMessage(
             async (message) => {
-                switch (message.command) {
-                    case 'save':
-                        const settingsToUpdate = [
-                            'appClientId', 'appTenantId',
-                            'dynamicsAPIVersion', 'solutionNameFilter', 'solutionSortAscending'
-                        ];
+                switch (message?.command) {
+                    case 'save': {
+                        const data = message.data;
+                        if (typeof data !== 'object' || data === null) {
+                            vscode.window.showErrorMessage('Received an invalid settings payload from the settings form.');
+                            return;
+                        }
                         const config = vscode.workspace.getConfiguration('webRM');
                         for (const key of settingsToUpdate) {
-                            if (message.data.hasOwnProperty(key)) {
-                                try {
-                                    await config.update(key, message.data[key], vscode.ConfigurationTarget.Global);
-                                } catch (error) {
-                                    console.error(`Failed to update setting ${key}:`, error);
-                                    vscode.window.showErrorMessage(`Failed to save setting: ${key}`);
-                                    // Potentially resolve('CANCELLED') or let user try again? For now, continue saving others.
-                                }
+                            if (!Object.prototype.hasOwnProperty.call(data, key)) {
+                                continue;
+                            }
+                            const value = (data as Record<string, unknown>)[key];
+                            if (key === 'solutionSortAscending' && typeof value !== 'boolean') {
+                                continue;
+                            }
+                            if (key !== 'solutionSortAscending' && typeof value !== 'string') {
+                                continue;
+                            }
+                            try {
+                                await config.update(key, value, vscode.ConfigurationTarget.Global);
+                            } catch (error) {
+                                console.error(`Failed to update setting ${key}:`, error);
+                                vscode.window.showErrorMessage(`Failed to save setting: ${key}`);
                             }
                         }
                         vscode.window.showInformationMessage('Web Resource Manager settings saved.');
                         resolve('SAVED');
                         panel.dispose();
                         return;
+                    }
                     case 'cancel':
                         resolve('CANCELLED');
                         panel.dispose();
@@ -306,17 +233,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await vscode.commands.executeCommand("setContext", "wrm.solutionLinked", false);
         await vscode.commands.executeCommand("setContext", "wrm.connected", false);
 
+        initLogger(context);
+
         // Register providers first so the activity bar icon and tree views appear as soon as the extension is ready.
         initializeStatusBar();
         initializeFileStatusBar();
         initializeSolutionStatusBar();
+        fileSyncStateService = new FileSyncStateService(fileStatusBar);
 
         const connectionExplorer = new ConnectionExplorer(context);
         const solutionExplorer = new SolutionExplorer(context, []);
         const webResourceExplorer = new WebResourceExplorer([]);
         const connectionStatusController = new ConnectionStatusController(statusBar);
         const selectedSolutionListener = solutionExplorer.onDidChangeSelectedSolution(solution => {
-            updateSolutionStatusBar(solution);
+            updateSolutionStatusBar(solution, solutionExplorer.getBoundWorkspaceFolder());
             void vscode.commands.executeCommand("setContext", "wrm.solutionLinked", !!solution);
         });
 
@@ -327,10 +257,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             connectionExplorer,
             solutionExplorer,
             webResourceExplorer,
-            connectionStatusController
+            connectionStatusController,
+            fileSyncStateService
         );
 
-        registerFileStatusListeners(context);
+        fileSyncStateService.registerListeners(context);
 
         context.subscriptions.push(statusBar, fileStatusBar, solutionStatusBar, selectedSolutionListener);
         await vscode.commands.executeCommand("setContext", "wrm.viewsReady", true);
@@ -342,7 +273,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             vscode.window.showWarningMessage(
                 `Required Web Resource Manager settings are missing: ${missingSettingsStr}. Please configure them to proceed.`
             );
-            
+
             // Prepare current settings to pass to the form
             const webRMConfig = vscode.workspace.getConfiguration('webRM');
             const currentSettings: { [key: string]: any } = {};
@@ -377,62 +308,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             return;
         }
 
-        // No general "extension active" message as per previous user request
-
     } catch (error: unknown) {
         await vscode.commands.executeCommand("setContext", "wrm.viewsReady", false);
         await vscode.commands.executeCommand("setContext", "wrm.solutionLinked", false);
         await vscode.commands.executeCommand("setContext", "wrm.connected", false);
         const message = error instanceof Error ? error.message : String(error);
         vscode.window.showErrorMessage(`Error activating Web Resource Manager extension: ${message}`);
-        // Log the full error to the console for more detailed debugging.
         console.error("Activation Error in Web Resource Manager:", error);
     }
 }
 
 /**
  * The deactivation function for the extension.
- * This function is called by VS Code when the extension is deactivated
- * (e.g., when VS Code is closed or the extension is disabled/uninstalled).
- * It's used to clean up resources, such as disposables like event listeners, status bar items, etc.
+ * Disposes of status bars. Per-connection MSAL caches are intentionally left
+ * in SecretStorage on ordinary deactivation, since silent re-login on the
+ * next activation depends on them; secrets are only removed explicitly when
+ * a connection is removed (see `wrm.removeConnection`).
  */
 export async function deactivate(): Promise<void> {
-    // Dispose of the status bar item if it was created.
-    if (statusBar) {
-        statusBar.dispose();
-    }
-    if (fileStatusBar) {
-        fileStatusBar.dispose();
-    }
-    if (solutionStatusBar) {
-        solutionStatusBar.dispose();
-    }
-    // Remove all persistent MSAL token caches for all connections
-    try {
-        const globalState = vscode.extensions.getExtension('sheeley7.vscode-webrm')?.exports?.context?.globalState
-            || vscode.workspace.getConfiguration('webRM');
-        // Try to get the extension context from the active extension instance
-        const context = (globalState && globalState._globalState) ? globalState._globalState : undefined;
-        // Fallback: try to get from workspace configuration if not available
-        let connections: any[] = [];
-        if (globalState && typeof globalState.get === 'function') {
-            connections = globalState.get('connections', []);
-        }
-        // If we have access to SecretStorage, delete all token caches
-        if (connections.length > 0 && vscode.workspace.workspaceFolders) {
-            const extCtx = vscode.extensions.getExtension('sheeley7.vscode-webrm')?.exports?.context;
-            if (extCtx && extCtx.secrets) {
-                for (const conn of connections) {
-                    const cacheKey = `${conn.connectionId}_msalTokenCache`;
-                    await extCtx.secrets.delete(cacheKey);
-                }
-            }
-        }
-    } catch (err) {
-        console.error('Failed to clean up persistent MSAL token caches:', err);
-    }
-    vscode.window.showInformationMessage("Web Resource Manager for Dynamics 365 has been deactivated.");
+    statusBar?.dispose();
+    fileStatusBar?.dispose();
+    solutionStatusBar?.dispose();
 }
-
-// Export setFileSyncState and resetAllFileSyncState for use in commandHandlers
-export { setFileSyncState, resetAllFileSyncState, computeFileHash };

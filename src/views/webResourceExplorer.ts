@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { buildResourceTree, ResourceTreeNode } from "./webResourceTree";
 
 /**
  * Implements the VS Code TreeDataProvider for the Web Resource Explorer view.
@@ -67,131 +68,36 @@ export class WebResourceExplorer implements vscode.TreeDataProvider<WebResource>
      * @param {WebResource[]} flatWebResources A flat list of WebResource objects.
      */
     public setWebResources(flatWebResources: WebResource[]): void {
-        // Create a conceptual root node to serve as the parent for all top-level items.
-        // This node itself is not displayed in the tree.
-        const conceptualRootNode = new WebResource("root", "", "root", "", "", "folder", true); 
-
-        // Process each web resource from the flat list and add it to the hierarchy.
-        for (const wr of flatWebResources) {
-            this.addWebResourceToHierarchy(conceptualRootNode, wr);
-        }
-        
-        // After building the entire tree structure, sort all children recursively.
-        this.sortChildrenRecursive(conceptualRootNode); 
-        // The children of the conceptual root node are the actual top-level items to display.
-        this.rootWebResources = conceptualRootNode.children;
+        // Build the pure (VS Code-independent) tree structure from logical names,
+        // then wrap each node in a WebResource TreeItem, looking up local path/content
+        // for file nodes from the original flat list.
+        const byId = new Map(flatWebResources.map(wr => [wr.webResourceId, wr]));
+        const tree = buildResourceTree(flatWebResources.map(wr => ({ name: wr.webResourceName, id: wr.webResourceId })));
+        this.rootWebResources = tree.map(node => this.toTreeItem(node, byId));
         this.refresh(); // Notify VS Code to update the tree view.
     }
-    
-    /**
-     * Adds a single web resource to its correct place in the hierarchical tree structure
-     * under the given `rootNode`.
-     * @param {WebResource} rootNode The current root or parent folder node under which to place the web resource.
-     * @param {WebResource} webResourceToAdd The WebResource object (representing a file) to be added.
-     * @private
-     */
-    private addWebResourceToHierarchy(rootNode: WebResource, webResourceToAdd: WebResource): void {
-        // Split the web resource's logical name (e.g., "new_scripts/myfolder/myscript.js") into parts.
-        const pathParts = webResourceToAdd.webResourceName.split('/');
-        let currentNode = rootNode; // Start traversal from the rootNode.
-        let currentPath = ""; // Accumulates the full path for creating folder nodes.
-
-        // Iterate through the path parts to create/find folder nodes.
-        // The loop goes up to `pathParts.length - 1` because the last part is the file itself.
-        for (let i = 0; i < pathParts.length - 1; i++) {
-            const folderNamePart = pathParts[i];
-            // Construct the full logical path for the current folder being processed.
-            if (i === 0) {
-                currentPath = folderNamePart;
-            } else {
-                currentPath = `${currentPath}/${folderNamePart}`;
-            }
-            // Find or create the folder node at the current level of the hierarchy.
-            currentNode = this.findOrCreateFolderNode(currentNode, folderNamePart, currentPath);
-        }
-
-        // The last part of the path is the file name.
-        const fileName = pathParts[pathParts.length - 1];
-        // Create the file node. It's important to use the correct `fileName` for the label
-        // and the full `webResourceName` as its logical identifier.
-        const fileNode = new WebResource(
-            webResourceToAdd.webResourceName, // Full logical name from CRM.
-            webResourceToAdd.webResourceId,   // CRM ID.
-            fileName,                         // Display name (the file name part).
-            webResourceToAdd.fullPath,        // Local file system path (if applicable).
-            webResourceToAdd.webResourceContent, // Content (usually fetched on demand).
-            "file"                            // Type identifier.
-        );
-        // Add the file node as a child of the deepest folder node found or created.
-        currentNode.children.push(fileNode);
-    }
 
     /**
-     * Finds an existing folder node within the children of `parentNode` or creates a new one if it doesn't exist.
-     * @param {WebResource} parentNode The parent WebResource node (must be of type 'folder').
-     * @param {string} folderName The name of the folder to find or create (a single segment of the path).
-     * @param {string} fullFolderPath The full logical path from CRM up to and including this folder.
-     * @returns {WebResource} The found or newly created folder WebResource node.
+     * Converts a pure `ResourceTreeNode` into a `WebResource` TreeItem, recursively
+     * converting its children. File nodes look up their local path/content from the
+     * original flat list (folders have no direct CRM record).
      * @private
      */
-    private findOrCreateFolderNode(parentNode: WebResource, folderName: string, fullFolderPath: string): WebResource {
-        // Search for an existing folder with the same name among the parent's children.
-        let folderNode = parentNode.children.find(child => child.fileName === folderName && child.type === "folder");
-
-        if (!folderNode) {
-            // If not found, create a new WebResource item to represent the folder.
-            folderNode = new WebResource(
-                fullFolderPath, // The full logical name/path for this folder.
-                "",             // Folders in this tree representation don't have a direct CRM ID.
-                folderName,     // The display name for this folder is the folderName itself.
-                "",             // Local fullPath is typically not applicable for virtual folders.
-                "",             // Folders don't have content.
-                "folder"        // Type identifier.
+    private toTreeItem(node: ResourceTreeNode, byId: Map<string, WebResource>): WebResource {
+        if (node.type === "file") {
+            const source = byId.get(node.id);
+            return new WebResource(
+                node.fullPath,
+                node.id,
+                node.name,
+                source?.fullPath ?? "",
+                source?.webResourceContent ?? "",
+                "file"
             );
-            // Add the new folder node to the parent's children.
-            parentNode.children.push(folderNode);
         }
-        return folderNode; // Return the found or newly created folder node.
-    }
-
-    /**
-     * Recursively sorts the `children` array of a given `WebResource` node.
-     * The sorting criteria are:
-     * 1. Folders appear before files.
-     * 2. Within each type (folders, files), items are sorted alphabetically by their `fileName` (display name), case-insensitive.
-     * @param {WebResource} node The WebResource node whose children need to be sorted.
-     * @private
-     */
-    private sortChildrenRecursive(node: WebResource): void {
-        if (node.children && node.children.length > 0) {
-            node.children.sort((a, b) => {
-                // Rule 1: Folders before files.
-                if (a.type === "folder" && b.type === "file") {
-                    return -1; // a (folder) comes before b (file).
-                }
-                if (a.type === "file" && b.type === "folder") {
-                    return 1;  // b (folder) comes before a (file).
-                }
-                
-                // Rule 2: Alphabetical sort within the same type (case-insensitive).
-                const nameA = a.fileName.toLowerCase();
-                const nameB = b.fileName.toLowerCase();
-                if (nameA < nameB) {
-                    return -1;
-                }
-                if (nameA > nameB) {
-                    return 1;
-                }
-                return 0; // Names are equal.
-            });
-
-            // After sorting the immediate children, recursively sort the children of any folder nodes.
-            for (const child of node.children) {
-                if (child.type === "folder") {
-                    this.sortChildrenRecursive(child);
-                }
-            }
-        }
+        const folder = new WebResource(node.fullPath, "", node.name, "", "", "folder");
+        folder.children = node.children.map(child => this.toTreeItem(child, byId));
+        return folder;
     }
 
     /**

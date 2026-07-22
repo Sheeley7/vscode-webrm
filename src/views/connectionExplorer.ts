@@ -143,6 +143,9 @@ export class ConnectionExplorer implements vscode.TreeDataProvider<Connection> {
         );
         // Persist the updated list of connections.
         await this.updateConnectionsInGlobalState();
+        // Explicitly drop this connection's cached MSAL tokens; secrets should not
+        // outlive the connection they belong to.
+        await connectionToRemove.deleteSecrets();
         this.refresh(); // Notify VS Code to refresh the tree view.
     }
 
@@ -155,9 +158,6 @@ export class ConnectionExplorer implements vscode.TreeDataProvider<Connection> {
         this._onDidChangeTreeData.fire();
     }
 }
-
-/** Threshold in minutes before token expiry to attempt proactive renewal. */
-const TOKEN_EXPIRATION_BUFFER_MINUTES = 5;
 
 /**
  * Represents a single Dynamics 365 connection item in the Connection Explorer view.
@@ -287,5 +287,15 @@ export class Connection extends vscode.TreeItem {
     public getConnectionUserName(): string | undefined {
         const accountInfo = this.authProvider.getAccountInfo();
         return accountInfo?.name;
+    }
+
+    /**
+     * Deletes this connection's persisted MSAL token cache from SecretStorage.
+     * Called when the connection itself is removed; secrets are intentionally
+     * left alone on ordinary extension deactivation so silent re-login keeps working.
+     */
+    public async deleteSecrets(): Promise<void> {
+        const cacheKey = `${this.connectionId}_msalTokenCache`;
+        await this.context.secrets.delete(cacheKey);
     }
 }
