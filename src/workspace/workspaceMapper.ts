@@ -16,6 +16,40 @@ export class UnsafeWebResourceNameError extends Error {
     }
 }
 
+export class UnsafeWebResourceRootError extends Error {
+    constructor(rootPath: string, reason: string) {
+        super(`Web resource root folder '${rootPath}' is not valid (${reason}).`);
+        this.name = "UnsafeWebResourceRootError";
+    }
+}
+
+/**
+ * Resolves the configured web-resource root sub-path (relative to a workspace
+ * folder) to an absolute directory, guaranteeing the result stays within that
+ * folder. An empty string or "." maps to the workspace folder itself.
+ *
+ * This is the directory that web resource logical names are anchored to, so a
+ * repo with web resources under a `webresources/` sub-folder can point the
+ * manager there instead of writing into the workspace root.
+ */
+export function resolveWebResourceRootDir(workspaceRoot: string, relativeRootPath: string): string {
+    const normalizedRoot = path.normalize(workspaceRoot);
+    const trimmed = (relativeRootPath ?? "").trim();
+    if (trimmed === "" || trimmed === ".") {
+        return normalizedRoot;
+    }
+    if (path.isAbsolute(trimmed) || /^[a-zA-Z]:/.test(trimmed)) {
+        throw new UnsafeWebResourceRootError(relativeRootPath, "must be a relative path, not absolute");
+    }
+
+    const resolved = path.normalize(path.join(normalizedRoot, trimmed));
+    const rootWithSep = normalizedRoot.endsWith(path.sep) ? normalizedRoot : normalizedRoot + path.sep;
+    if (resolved !== normalizedRoot && !resolved.startsWith(rootWithSep)) {
+        throw new UnsafeWebResourceRootError(relativeRootPath, "resolves outside the workspace folder");
+    }
+    return resolved;
+}
+
 /**
  * Splits a logical web resource name into path segments, rejecting anything
  * that could escape the workspace root (empty segments, '.', '..', or an

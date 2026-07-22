@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import * as path from "path";
 import {
     resolveWebResourcePath,
+    resolveWebResourceRootDir,
     splitWebResourceNameSafely,
     splitResourceFolderAndFile,
     toWebResourceName,
     UnsafeWebResourceNameError,
+    UnsafeWebResourceRootError,
 } from "./workspaceMapper";
 
 const ROOT = path.normalize(process.platform === "win32" ? "C:\\workspace" : "/workspace");
@@ -66,4 +68,41 @@ test("toWebResourceName returns undefined for a path outside the root", () => {
 
 test("toWebResourceName returns undefined for the root itself (no relative name)", () => {
     assert.equal(toWebResourceName(ROOT, ROOT), undefined);
+});
+
+test("resolveWebResourceRootDir maps a relative sub-folder under the workspace root", () => {
+    assert.equal(
+        resolveWebResourceRootDir(ROOT, "webresources"),
+        path.normalize(path.join(ROOT, "webresources"))
+    );
+    assert.equal(
+        resolveWebResourceRootDir(ROOT, "components/webresources"),
+        path.normalize(path.join(ROOT, "components", "webresources"))
+    );
+});
+
+test("resolveWebResourceRootDir treats empty string and '.' as the workspace root", () => {
+    assert.equal(resolveWebResourceRootDir(ROOT, ""), path.normalize(ROOT));
+    assert.equal(resolveWebResourceRootDir(ROOT, "."), path.normalize(ROOT));
+    assert.equal(resolveWebResourceRootDir(ROOT, "   "), path.normalize(ROOT));
+});
+
+test("resolveWebResourceRootDir anchors web resource names under the sub-folder", () => {
+    const rootDir = resolveWebResourceRootDir(ROOT, "webresources");
+    assert.equal(
+        resolveWebResourcePath(rootDir, "new_/scripts/account.js"),
+        path.normalize(path.join(ROOT, "webresources", "new_", "scripts", "account.js"))
+    );
+    const filePath = path.join(ROOT, "webresources", "new_", "scripts", "account.js");
+    assert.equal(toWebResourceName(rootDir, filePath), "new_/scripts/account.js");
+});
+
+test("resolveWebResourceRootDir rejects an absolute path", () => {
+    assert.throws(() => resolveWebResourceRootDir(ROOT, "/etc"), UnsafeWebResourceRootError);
+    assert.throws(() => resolveWebResourceRootDir(ROOT, "C:/Windows"), UnsafeWebResourceRootError);
+});
+
+test("resolveWebResourceRootDir rejects a path that escapes the workspace folder", () => {
+    assert.throws(() => resolveWebResourceRootDir(ROOT, "../outside"), UnsafeWebResourceRootError);
+    assert.throws(() => resolveWebResourceRootDir(ROOT, "sub/../../outside"), UnsafeWebResourceRootError);
 });

@@ -12,8 +12,10 @@ import { generateNonce } from "./utils/nonce";
 import { logError } from "./utils/logger";
 import {
     resolveWebResourcePath,
+    resolveWebResourceRootDir,
     toWebResourceName,
     UnsafeWebResourceNameError,
+    UnsafeWebResourceRootError,
 } from "./workspace/workspaceMapper";
 
 /**
@@ -59,16 +61,93 @@ function getBoundOrSingleWorkspaceFolder(solutionExplorer: SolutionExplorer): vs
 }
 
 /**
- * Resolves a web resource's logical name to a local path under `workspaceFolder`,
- * creating parent directories. Rejects names that would escape the workspace root.
+ * Resolves the configured web resource root for `workspaceFolder` to an absolute
+ * directory, without prompting. Falls back to the workspace folder root when the
+ * setting is blank or invalid. Used where prompting is inappropriate (e.g. when
+ * probing several folders to reverse-map a file to a logical name).
+ */
+function getConfiguredWebResourceRootDir(workspaceFolder: vscode.WorkspaceFolder): string {
+    const configured = ConfigurationService.getWebResourceRootPath(workspaceFolder.uri);
+    try {
+        return resolveWebResourceRootDir(workspaceFolder.uri.fsPath, configured);
+    } catch {
+        return path.normalize(workspaceFolder.uri.fsPath);
+    }
+}
+
+/**
+ * Prompts for the web resource root folder (relative to `workspaceFolder`) and
+ * persists it. Returns the entered value, or undefined if the user cancels.
+ */
+async function promptForWebResourceRootPath(workspaceFolder: vscode.WorkspaceFolder): Promise<string | undefined> {
+    const input = await vscode.window.showInputBox({
+        title: "Web Resource Root Folder",
+        prompt: `Relative folder within '${workspaceFolder.name}' where web resources live. Use '.' for the workspace root.`,
+        placeHolder: "e.g. webresources",
+        value: "webresources",
+        ignoreFocusOut: true,
+        validateInput: value => {
+            if (value.trim() === "") {
+                return "Enter a relative folder, or '.' for the workspace root.";
+            }
+            try {
+                resolveWebResourceRootDir(workspaceFolder.uri.fsPath, value);
+                return undefined;
+            } catch (error) {
+                return error instanceof UnsafeWebResourceRootError ? error.message : String(error);
+            }
+        },
+    });
+
+    if (input === undefined) {
+        return undefined;
+    }
+    const value = input.trim();
+    await ConfigurationService.updateWebResourceRootPath(value, workspaceFolder.uri);
+    return value;
+}
+
+/**
+ * Returns the absolute directory web resource logical names are anchored to for
+ * `workspaceFolder`: the folder joined with the configured relative root path.
+ * Prompts for (and saves) the root path the first time it is needed. Returns
+ * undefined if the user dismisses the prompt or the stored value is invalid.
+ */
+async function getWebResourceRootDir(workspaceFolder: vscode.WorkspaceFolder): Promise<string | undefined> {
+    let rootPath = ConfigurationService.getWebResourceRootPath(workspaceFolder.uri);
+    if (rootPath.trim() === "") {
+        const entered = await promptForWebResourceRootPath(workspaceFolder);
+        if (entered === undefined) {
+            vscode.window.showInformationMessage(
+                "A web resource root folder is required before reading or writing web resources."
+            );
+            return undefined;
+        }
+        rootPath = entered;
+    }
+
+    try {
+        return resolveWebResourceRootDir(workspaceFolder.uri.fsPath, rootPath);
+    } catch (error: unknown) {
+        const message = error instanceof UnsafeWebResourceRootError ? error.message : String(error);
+        vscode.window.showErrorMessage(
+            `Invalid web resource root folder '${rootPath}': ${message} Update the 'webRM.webResourceRootPath' setting.`
+        );
+        return undefined;
+    }
+}
+
+/**
+ * Resolves a web resource's logical name to a local path under `rootDir`,
+ * creating parent directories. Rejects names that would escape the root.
  */
 async function prepareWebResourceFilePath(
     webResourceName: string,
-    workspaceFolder: vscode.WorkspaceFolder
+    rootDir: string
 ): Promise<string | undefined> {
     let fullFilePath: string;
     try {
-        fullFilePath = resolveWebResourcePath(workspaceFolder.uri.fsPath, webResourceName);
+        fullFilePath = resolveWebResourcePath(rootDir, webResourceName);
     } catch (error: unknown) {
         const message = error instanceof UnsafeWebResourceNameError ? error.message : String(error);
         vscode.window.showErrorMessage(`Cannot map web resource '${webResourceName}' to a local path: ${message}`);
@@ -88,17 +167,19 @@ async function prepareWebResourceFilePath(
 
 function getLocalFilePathForWebResourceName(
     webResourceName: string,
-    workspaceFolder: vscode.WorkspaceFolder
+    rootDir: string
 ): string | undefined {
     try {
-        return resolveWebResourcePath(workspaceFolder.uri.fsPath, webResourceName);
+        return resolveWebResourcePath(rootDir, webResourceName);
     } catch (error: unknown) {
         logError("workspaceMapper.resolveWebResourcePath", error);
         return undefined;
     }
 }
 
-function getWebResourceNameFromDocument(document: vscode.TextDocument): { filePath: string; webResourceName?: string } {
+async function getWebResourceNameFromDocument(
+    document: vscode.TextDocument
+): Promise<{ filePath: string; webResourceName?: string }> {
     const workspaceFolders = vscode.workspace.workspaceFolders;
     let rawFilePath = document.uri.fsPath || document.fileName;
     if (workspaceFolders?.length === 1 && rawFilePath && !path.isAbsolute(rawFilePath)) {
@@ -112,11 +193,17 @@ function getWebResourceNameFromDocument(document: vscode.TextDocument): { filePa
 
     const directFolder = vscode.workspace.getWorkspaceFolder(document.uri);
     if (directFolder) {
-        return { filePath, webResourceName: toWebResourceName(directFolder.uri.fsPath, filePath) };
+        const rootDir = await getWebResourceRootDir(directFolder);
+        if (rootDir === undefined) {
+            return { filePath };
+        }
+        return { filePath, webResourceName: toWebResourceName(rootDir, filePath) };
     }
 
+    // File isn't inside any workspace folder's tree via getWorkspaceFolder: probe each
+    // folder's configured root without prompting, and take the closest logical name.
     const candidates = workspaceFolders
-        .map(folder => toWebResourceName(folder.uri.fsPath, filePath))
+        .map(folder => toWebResourceName(getConfiguredWebResourceRootDir(folder), filePath))
         .filter((name): name is string => !!name)
         .sort((a, b) => a.length - b.length);
 
@@ -428,6 +515,12 @@ export function registerCommands(
 
             solutionExplorer.setSelectedSolution(solution);
             solutionExplorer.setBoundWorkspaceFolder(workspaceFolder);
+
+            // Establish the web resource root up front (prompting if unset) so files
+            // land under the configured sub-folder rather than the workspace root. A
+            // cancelled prompt doesn't block browsing; each pull/push re-checks it.
+            await getWebResourceRootDir(workspaceFolder);
+
             try {
                 await vscode.window.withProgress(
                     {
@@ -536,6 +629,10 @@ export function registerCommands(
             if (!workspaceFolder) {
                 return;
             }
+            const rootDir = await getWebResourceRootDir(workspaceFolder);
+            if (!rootDir) {
+                return;
+            }
 
             const candidates: Array<{ webResource: WebResource; localPath: string; base64Content: string; etag?: string }> = [];
             let wasCancelled = false;
@@ -564,7 +661,7 @@ export function registerCommands(
                             if (token.isCancellationRequested) return;
 
                             const webResource = webResources[i];
-                            const localPath = getLocalFilePathForWebResourceName(webResource.webResourceName, workspaceFolder);
+                            const localPath = getLocalFilePathForWebResourceName(webResource.webResourceName, rootDir);
                             if (!localPath) {
                                 progress.report({ increment: 50 / total });
                                 continue;
@@ -709,6 +806,10 @@ export function registerCommands(
             if (!workspaceFolder) {
                 return;
             }
+            const rootDir = await getWebResourceRootDir(workspaceFolder);
+            if (!rootDir) {
+                return;
+            }
 
             const candidates: Array<{ webResource: WebResource; localPath: string; serverContent: string }> = [];
             let wasCancelled = false;
@@ -737,7 +838,7 @@ export function registerCommands(
                             if (token.isCancellationRequested) return;
 
                             const webResource = webResources[i];
-                            const localPath = await prepareWebResourceFilePath(webResource.webResourceName, workspaceFolder);
+                            const localPath = await prepareWebResourceFilePath(webResource.webResourceName, rootDir);
                             if (!localPath) {
                                 throw new Error(`Could not prepare local path for '${webResource.webResourceName}'.`);
                             }
@@ -841,7 +942,12 @@ export function registerCommands(
                     return;
                 }
 
-                const fullFilePath = await prepareWebResourceFilePath(webResource.webResourceName, workspaceFolder);
+                const rootDir = await getWebResourceRootDir(workspaceFolder);
+                if (!rootDir) {
+                    return;
+                }
+
+                const fullFilePath = await prepareWebResourceFilePath(webResource.webResourceName, rootDir);
                 if (!fullFilePath) {
                     return;
                 }
@@ -923,7 +1029,7 @@ export function registerCommands(
 
                 const document = activeEditor.document;
                 const baseName = path.basename(document.fileName);
-                const { filePath: currentPath, webResourceName } = getWebResourceNameFromDocument(document);
+                const { filePath: currentPath, webResourceName } = await getWebResourceNameFromDocument(document);
 
                 if (!webResourceName) {
                     vscode.window.showErrorMessage(
@@ -1023,7 +1129,7 @@ export function registerCommands(
                 const document = activeEditor.document;
                 const fileName = document.fileName;
                 const baseName = path.basename(fileName);
-                const { filePath: currentPath, webResourceName } = getWebResourceNameFromDocument(document);
+                const { filePath: currentPath, webResourceName } = await getWebResourceNameFromDocument(document);
                 const progressName = webResourceName ?? baseName;
 
                 if (document.isDirty) {

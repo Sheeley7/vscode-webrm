@@ -21,6 +21,7 @@ This extension contributes the following settings:
 - `webRM.appClientId`: (REQUIRED) Client Id of your registered app in Azure
 - `webRM.appTenantId`: (REQUIRED FOR SINGLE TENANT APPS) Tenant Id of your registered app in Azure. Leave blank if Multi-Tenant
 - `webRM.dynamicsAPIVersion`: (REQUIRED) API Version for Dynamics 365 Web API
+- `webRM.webResourceRootPath`: Relative folder within the linked workspace folder that web resources are anchored to (e.g. `webresources` when a multi-component repo keeps web resources under a sub-folder). Use `.` for the workspace root. If left blank, you'll be prompted for it the first time web resource files are read or written. Set per-folder in multi-root workspaces.
 - `webRM.solutionNameFilter`: Used to filter solution list retrieved from Dynamics
 - `webRM.solutionSortAscending`: Used to change sort order of returned solution list
 
@@ -31,6 +32,11 @@ This extension contributes the following settings:
 Currently, this extension only works for Dynamics 365 Online. It has only been tested with version 9.0+.
 
 ## Release Notes
+
+### 1.2.0
+- Added the `webRM.webResourceRootPath` setting to anchor web resources to a relative sub-folder (e.g. `webresources`) within the linked workspace folder, instead of always writing into the workspace root. Use `.` for the workspace root.
+- When the root folder is not yet configured, the extension prompts for it the first time it reads or writes web resource files (and when linking a solution), then saves it to the folder's settings.
+- The setting is resource-scoped, so each folder in a multi-root workspace can have its own web resource root.
 
 ### 1.1.9
 - Updated MSAL to `@azure/msal-node` 5.1.5 and raised the VS Code engine/runtime target for Node 20 support.

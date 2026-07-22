@@ -9,9 +9,36 @@ export class ConfigurationService {
      * @returns {vscode.WorkspaceConfiguration} The workspace configuration object.
      * @private
      */
-    private static getConfiguration(): vscode.WorkspaceConfiguration {
-        // Fetches the configuration section specific to this extension.
-        return vscode.workspace.getConfiguration("webRM");
+    private static getConfiguration(resource?: vscode.Uri): vscode.WorkspaceConfiguration {
+        // Fetches the configuration section specific to this extension. Passing a
+        // resource URI honors resource-scoped, per-folder overrides in multi-root
+        // workspaces (e.g. a different web resource root per folder).
+        return vscode.workspace.getConfiguration("webRM", resource);
+    }
+
+    /**
+     * Gets the 'webResourceRootPath' from the extension settings: the folder
+     * (relative to the workspace folder) that web resource logical names are
+     * anchored to. Empty string means "not configured yet".
+     * @param {vscode.Uri} [resource] Folder URI used to resolve per-folder overrides.
+     * @returns {string} The configured relative root path, or "" if unset.
+     */
+    static getWebResourceRootPath(resource?: vscode.Uri): string {
+        return this.getConfiguration(resource).get("webResourceRootPath", "");
+    }
+
+    /**
+     * Persists the 'webResourceRootPath' setting for a specific workspace folder.
+     * @param {string} value The relative root path to store.
+     * @param {vscode.Uri} resource Folder URI the value applies to.
+     * @returns {Thenable<void>} A promise that resolves when the update is complete.
+     */
+    static updateWebResourceRootPath(value: string, resource: vscode.Uri): Thenable<void> {
+        return this.getConfiguration(resource).update(
+            "webResourceRootPath",
+            value,
+            vscode.ConfigurationTarget.WorkspaceFolder
+        );
     }
 
     /**

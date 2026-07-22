@@ -1,5 +1,10 @@
 # Change Log
 
+## [1.2.0]
+- Added the `webRM.webResourceRootPath` setting: a relative folder (within the workspace folder linked to a solution) that web resources are anchored to. Use it to point the manager at a `webresources/` sub-folder in a multi-component repo instead of writing into the workspace root; use `.` for the workspace root itself.
+- When the root folder is not yet configured, the extension now prompts for it the first time it needs to read or write web resource files (and when linking a solution), then saves it to the folder's settings.
+- The setting is resource-scoped, so each folder in a multi-root workspace can have its own web resource root.
+
 ## [1.1.9]
 - Updated MSAL to `@azure/msal-node` 5.1.5 and raised the VS Code engine/runtime target for Node 20 support.
 - Removed the `uuid` dependency and now use Node's built-in UUID generation.
